@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.env
+.env.local
+.env.example
+backend/.env
+frontend/.env.local
+uploads/*
+!uploads/.gitkeep
+*.log
+.DS_Store
