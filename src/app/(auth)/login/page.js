@@ -80,7 +80,7 @@ export default function LoginPage() {
       <h2 className="text-2xl font-bold text-surface-900 mb-1">Welcome back</h2>
       <p className="text-surface-500 text-sm mb-4">Sign in to manage projects and tasks</p>
 
-      {apiStatus && (
+      {/* {apiStatus && (
         <div
           className={`mb-4 p-3 rounded-xl text-xs border ${
             apiStatus.ok
@@ -121,7 +121,7 @@ export default function LoginPage() {
             Recheck connection
           </button>
         </div>
-      )}
+      )} */}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -153,12 +153,12 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <p className="mt-4 text-center text-sm text-gray-600">
+      {/* <p className="mt-4 text-center text-sm text-gray-600">
         Don&apos;t have an account?{' '}
         <Link href="/register" className="text-primary-600 hover:underline font-medium">
           Register
         </Link>
-      </p>
+      </p> */}
     </>
   );
 }
