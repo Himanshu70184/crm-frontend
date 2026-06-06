@@ -20,8 +20,8 @@ export default function ProjectDetailPage() {
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [tasksLoading, setTasksLoading] = useState(true);
 
-  const canManage = ['admin', 'manager'].includes(user?.role);
-  const canViewBudget = user?.role === 'admin';
+  const canManage = ['super_admin', 'admin', 'manager'].includes(user?.role);
+  const canViewBudget = ['super_admin', 'admin'].includes(user?.role);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,7 +236,7 @@ function ProjectTeamTab({ project, canManage, onUpdate }) {
   useEffect(() => {
     usersAPI.getAll({ limit: 200 }).then((res) => {
       const list = (res.data.users || []).filter(
-        (u) => u.isActive !== false && ['admin', 'manager', 'member'].includes(u.role)
+        (u) => u.isActive !== false && ['super_admin', 'admin', 'manager', 'team_member', 'member'].includes(u.role)
       );
       setAllUsers(list);
     }).catch(() => {});

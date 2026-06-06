@@ -16,6 +16,7 @@ import {
 } from '@/lib/utils';
 import { DEFAULT_COLUMNS } from '@/lib/kanban';
 import { useAuth } from '@/context/AuthContext';
+import { useOrganizationSettings } from '@/context/OrganizationSettingsContext';
 import TaskTimer from '@/components/tasks/TaskTimer';
 import toast from 'react-hot-toast';
 
@@ -308,8 +309,10 @@ export default function TaskDetailModal({
   onUpdated,
   onDeleted,
 }) {
+  const { isModuleEnabled } = useOrganizationSettings();
   const { user } = useAuth();
-  const canManage = ['admin', 'manager'].includes(user?.role);
+  const canManage = ['super_admin', 'admin', 'manager'].includes(user?.role);
+  const isTimeTrackingEnabled = isModuleEnabled('timeTracking');
   const commentInputRef = useRef(null);
 
   const [task, setTask] = useState(null);
@@ -370,12 +373,17 @@ export default function TaskDetailModal({
     if (!taskId || !open) return;
     setLoading(true);
     try {
-      const [tRes, cRes, aRes, lRes] = await Promise.all([
+      const requests = [
         tasksAPI.getOne(taskId),
         commentsAPI.getAll({ task: taskId }),
         tasksAPI.getActivities(taskId),
-        timeLogsAPI.getAll({ task: taskId }),
-      ]);
+      ];
+
+      if (isTimeTrackingEnabled) {
+        requests.push(timeLogsAPI.getAll({ task: taskId }));
+      }
+
+      const [tRes, cRes, aRes, lRes] = await Promise.all(requests);
       const t = tRes.data.task;
       setTask(t);
       setTitleDraft(t.title);
@@ -384,7 +392,7 @@ export default function TaskDetailModal({
       setDueDraft(t.dueDate ? new Date(t.dueDate).toISOString().split('T')[0] : '');
       setComments(cRes.data.comments || []);
       setActivities(aRes.data.activities || []);
-      setTimeLogs(lRes.data.logs || []);
+      setTimeLogs(isTimeTrackingEnabled ? (lRes?.data?.logs || []) : []);
 
       const pid = t.project?._id || t.project;
       if (pid) {
@@ -398,7 +406,7 @@ export default function TaskDetailModal({
     } finally {
       setLoading(false);
     }
-  }, [taskId, open, onClose]);
+  }, [taskId, open, onClose, isTimeTrackingEnabled]);
 
   useEffect(() => {
     if (open) loadTask();
@@ -766,27 +774,29 @@ export default function TaskDetailModal({
                     </PopoverPanel>
                   </div>
 
-                  <div className="relative">
-                    <ActionChip
-                      icon="⏱"
-                      label={`${task.loggedHours?.toFixed(1) || 0}h tracked`}
-                      active={activePanel === 'time'}
-                      onClick={() => setActivePanel(activePanel === 'time' ? null : 'time')}
-                    />
-                    <PopoverPanel
-                      open={activePanel === 'time'}
-                      onClose={() => setActivePanel(null)}
-                      className="!min-w-[320px]"
-                    >
-                      <TaskTimer
-                        taskId={taskId}
-                        projectId={task.project?._id || task.project}
-                        totalLoggedHours={task.loggedHours}
-                        onTimeLogged={onTimeLogged}
-                        embedded
+                  {isTimeTrackingEnabled && (
+                    <div className="relative">
+                      <ActionChip
+                        icon="⏱"
+                        label={`${task.loggedHours?.toFixed(1) || 0}h tracked`}
+                        active={activePanel === 'time'}
+                        onClick={() => setActivePanel(activePanel === 'time' ? null : 'time')}
                       />
-                    </PopoverPanel>
-                  </div>
+                      <PopoverPanel
+                        open={activePanel === 'time'}
+                        onClose={() => setActivePanel(null)}
+                        className="!min-w-[320px]"
+                      >
+                        <TaskTimer
+                          taskId={taskId}
+                          projectId={task.project?._id || task.project}
+                          totalLoggedHours={task.loggedHours}
+                          onTimeLogged={onTimeLogged}
+                          embedded
+                        />
+                      </PopoverPanel>
+                    </div>
+                  )}
 
                   <div className="relative">
                     <ActionChip

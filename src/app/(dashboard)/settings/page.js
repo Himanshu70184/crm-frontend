@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { authAPI, settingsAPI } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useBranding } from '@/context/BrandingContext';
+import { useOrganizationSettings } from '@/context/OrganizationSettingsContext';
+import { ORGANIZATION_MODULES, normalizeOrganizationModules } from '@/lib/organizationModules';
 import { ROLE_COLORS } from '@/lib/utils';
 import PageHeader from '@/components/ui/PageHeader';
 import toast from 'react-hot-toast';
@@ -21,10 +23,22 @@ const DEFAULT_BRANDING = {
   authGradientTo: '#e0e7ff',
 };
 
+const WEEK_DAYS = [
+  ['Sunday', 0],
+  ['Monday', 1],
+  ['Tuesday', 2],
+  ['Wednesday', 3],
+  ['Thursday', 4],
+  ['Friday', 5],
+  ['Saturday', 6],
+];
+
 export default function SettingsPage() {
   const { user, updateUser } = useAuth();
   const { refresh: refreshBranding } = useBranding();
-  const isAdmin = user?.role === 'admin';
+  const { refresh: refreshOrganizationSettings } = useOrganizationSettings();
+  const isAdmin = ['admin', 'super_admin'].includes(user?.role);
+  const isSuperAdmin = user?.role === 'super_admin';
   const [activeTab, setActiveTab] = useState('profile');
   const [settings, setSettings] = useState(null);
   const [emailStatus, setEmailStatus] = useState(null);
@@ -41,21 +55,85 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (isAdmin) {
-      settingsAPI.get().then((res) => setSettings(res.data.settings)).catch(() => {});
+      settingsAPI.get().then((res) => setSettings({
+        ...res.data.settings,
+        organizationModules: normalizeOrganizationModules(res.data.settings?.organizationModules),
+      })).catch(() => {});
       settingsAPI.emailStatus().then((res) => setEmailStatus(res.data)).catch(() => {});
     }
   }, [isAdmin]);
 
   const tabs = isAdmin
-    ? ['profile', 'security', 'company', 'branding', 'email']
+    ? ['profile', 'security', 'company', 'branding', 'attendance', 'email', ...(isSuperAdmin ? ['modules'] : []), 'roles']
     : ['profile', 'security'];
+
+  const addShift = () => {
+    const shifts = settings?.attendance?.shifts || [];
+    const idx = shifts.length + 1;
+    updateField('attendance.shifts', [
+      ...shifts,
+      {
+        code: `shift_${idx}`,
+        name: `Shift ${idx}`,
+        startTime: '09:30',
+        endTime: '18:30',
+        graceMinutes: 0,
+        halfDayMinutes: 240,
+        isOvernight: false,
+      },
+    ]);
+  };
+
+  const removeShift = (index) => {
+    const shifts = (settings?.attendance?.shifts || []).filter((_, i) => i !== index);
+    updateField('attendance.shifts', shifts.length ? shifts : [
+      {
+        code: 'general',
+        name: 'General Shift',
+        startTime: '09:30',
+        endTime: '18:30',
+        graceMinutes: 0,
+        halfDayMinutes: 240,
+        isOvernight: false,
+      },
+    ]);
+  };
+
+  const updateShift = (index, key, value) => {
+    const shifts = [...(settings?.attendance?.shifts || [])];
+    shifts[index] = { ...shifts[index], [key]: value };
+    updateField('attendance.shifts', shifts);
+  };
+
+  const addHoliday = () => {
+    const holidays = settings?.attendance?.holidays || [];
+    updateField('attendance.holidays', [
+      ...holidays,
+      { name: 'New Holiday', date: new Date().toISOString().split('T')[0], optional: false },
+    ]);
+  };
+
+  const removeHoliday = (index) => {
+    const holidays = (settings?.attendance?.holidays || []).filter((_, i) => i !== index);
+    updateField('attendance.holidays', holidays);
+  };
+
+  const updateHoliday = (index, key, value) => {
+    const holidays = [...(settings?.attendance?.holidays || [])];
+    holidays[index] = { ...holidays[index], [key]: value };
+    updateField('attendance.holidays', holidays);
+  };
 
   const saveSettings = async (payload, message = 'Settings saved') => {
     setSaving(true);
     try {
       const res = await settingsAPI.update(payload);
-      setSettings(res.data.settings);
+      setSettings({
+        ...res.data.settings,
+        organizationModules: normalizeOrganizationModules(res.data.settings?.organizationModules),
+      });
       await refreshBranding();
+      await refreshOrganizationSettings();
       toast.success(message);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to save');
@@ -108,7 +186,7 @@ export default function SettingsPage() {
       const keys = path.split('.');
       let obj = next;
       for (let i = 0; i < keys.length - 1; i++) {
-        obj[keys[i]] = { ...obj[keys[i]] };
+        obj[keys[i]] = { ...(obj[keys[i]] || {}) };
         obj = obj[keys[i]];
       }
       obj[keys[keys.length - 1]] = value;
@@ -302,6 +380,139 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {activeTab === 'attendance' && isAdmin && settings && (
+        <div className="space-y-4">
+          <div className="card p-6 space-y-4">
+            <h3 className="font-semibold text-surface-900">Attendance Policy</h3>
+            <p className="text-sm text-surface-500">Define weekly offs, shifts, and company holiday calendar.</p>
+
+            <div>
+              <label className="label">Default Shift Code</label>
+              <input
+                className="input"
+                value={settings.attendance?.defaultShiftCode || ''}
+                onChange={(e) => updateField('attendance.defaultShiftCode', e.target.value)}
+              />
+            </div>
+
+            <div>
+              <p className="label">Weekly Off Days</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {WEEK_DAYS.map(([label, value]) => {
+                  const selected = (settings.attendance?.weeklyOffDays || []).includes(value);
+                  return (
+                    <label key={label} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={(e) => {
+                          const current = new Set(settings.attendance?.weeklyOffDays || []);
+                          if (e.target.checked) current.add(value);
+                          else current.delete(value);
+                          updateField('attendance.weeklyOffDays', Array.from(current).sort((a, b) => a - b));
+                        }}
+                      />
+                      {label}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={settings.attendance?.autoMarkEnabled !== false}
+                onChange={(e) => updateField('attendance.autoMarkEnabled', e.target.checked)}
+              />
+              Auto-mark absent/leave/holiday for days with no clock-in
+            </label>
+          </div>
+
+          <div className="card p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-surface-900">Shift Definitions</h3>
+              <button type="button" className="btn-secondary" onClick={addShift}>Add Shift</button>
+            </div>
+
+            {(settings.attendance?.shifts || []).map((shift, index) => (
+              <div key={`${shift.code || 'shift'}-${index}`} className="rounded-xl border border-surface-200 p-4 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Code</label>
+                    <input className="input" value={shift.code || ''} onChange={(e) => updateShift(index, 'code', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Name</label>
+                    <input className="input" value={shift.name || ''} onChange={(e) => updateShift(index, 'name', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Start Time</label>
+                    <input type="time" className="input" value={shift.startTime || '09:30'} onChange={(e) => updateShift(index, 'startTime', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">End Time</label>
+                    <input type="time" className="input" value={shift.endTime || '18:30'} onChange={(e) => updateShift(index, 'endTime', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Grace Minutes</label>
+                    <input type="number" className="input" value={shift.graceMinutes ?? 0} onChange={(e) => updateShift(index, 'graceMinutes', Number(e.target.value) || 0)} />
+                  </div>
+                  <div>
+                    <label className="label">Half-Day Threshold (minutes)</label>
+                    <input type="number" className="input" value={shift.halfDayMinutes ?? 240} onChange={(e) => updateShift(index, 'halfDayMinutes', Number(e.target.value) || 240)} />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={Boolean(shift.isOvernight)} onChange={(e) => updateShift(index, 'isOvernight', e.target.checked)} />
+                    Overnight shift
+                  </label>
+                  <button type="button" className="text-sm text-rose-600" onClick={() => removeShift(index)}>Remove</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="card p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-surface-900">Holiday Calendar</h3>
+              <button type="button" className="btn-secondary" onClick={addHoliday}>Add Holiday</button>
+            </div>
+
+            {(settings.attendance?.holidays || []).length === 0 ? (
+              <p className="text-sm text-surface-500">No holidays configured.</p>
+            ) : (
+              <div className="space-y-3">
+                {(settings.attendance?.holidays || []).map((holiday, index) => (
+                  <div key={`${holiday.name || 'holiday'}-${index}`} className="grid grid-cols-1 sm:grid-cols-[1fr_180px_auto_auto] gap-3 items-center">
+                    <input className="input" value={holiday.name || ''} onChange={(e) => updateHoliday(index, 'name', e.target.value)} />
+                    <input
+                      type="date"
+                      className="input"
+                      value={holiday.date ? new Date(holiday.date).toISOString().split('T')[0] : ''}
+                      onChange={(e) => updateHoliday(index, 'date', e.target.value)}
+                    />
+                    <label className="flex items-center gap-2 text-sm whitespace-nowrap">
+                      <input type="checkbox" checked={Boolean(holiday.optional)} onChange={(e) => updateHoliday(index, 'optional', e.target.checked)} />
+                      Optional
+                    </label>
+                    <button type="button" className="text-sm text-rose-600" onClick={() => removeHoliday(index)}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <button type="button" className="btn-primary" disabled={saving} onClick={() => saveSettings(settings, 'Attendance policy saved')}>
+                Save Attendance Policy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'email' && isAdmin && settings && (
         <div className="space-y-4">
           <div className={`card p-4 text-sm ${emailStatus?.ok ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-900 border-amber-200'}`}>
@@ -368,6 +579,70 @@ export default function SettingsPage() {
               <button type="button" className="btn-secondary whitespace-nowrap" onClick={handleTestEmail}>Send Test</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'modules' && isSuperAdmin && settings && (
+        <div className="space-y-4">
+          <div className="card p-6 space-y-5">
+            <div>
+              <h3 className="font-semibold text-surface-900">Organization Modules</h3>
+              <p className="text-sm text-surface-500 mt-1">
+                Choose which product areas are available to this organization. Disabled modules are hidden from navigation and blocked at the page level.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {ORGANIZATION_MODULES.map((moduleDef) => {
+                const enabled = settings.organizationModules?.[moduleDef.key] !== false;
+                return (
+                  <label
+                    key={moduleDef.key}
+                    className="rounded-2xl border border-surface-200 p-4 flex items-start justify-between gap-4 cursor-pointer hover:border-brand-primary/30 transition-colors"
+                  >
+                    <div>
+                      <p className="font-medium text-surface-900">{moduleDef.label}</p>
+                      <p className="text-sm text-surface-500 mt-1">{moduleDef.description}</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(e) => updateField(`organizationModules.${moduleDef.key}`, e.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-surface-300"
+                    />
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={saving}
+                onClick={() => saveSettings({ organizationModules: settings.organizationModules }, 'Organization modules updated')}
+              >
+                Save Modules
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'roles' && isAdmin && (
+        <div className="card p-6 text-center space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-purple-100 flex items-center justify-center mx-auto">
+            <svg className="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">Role & Permission Management</h3>
+            <p className="text-gray-500 text-sm mt-1">Create custom roles, assign fine-grained permissions per module, and control data access levels.</p>
+          </div>
+          <a href="/settings/roles" className="btn-primary inline-block">
+            Open Roles & Permissions Manager →
+          </a>
         </div>
       )}
     </div>

@@ -110,6 +110,18 @@ export const timeLogsAPI = {
   remove: (id) => api.delete(`/timelogs/${id}`),
 };
 
+// ─── Attendance ────────────────────────────────────
+export const attendanceAPI = {
+  getAll: (params) => api.get('/attendance', { params }),
+  getToday: (params) => api.get('/attendance/today', { params }),
+  clockIn: (data) => api.post('/attendance/clock-in', data),
+  clockOut: (data) => api.post('/attendance/clock-out', data),
+  reconcile: (data) => api.post('/attendance/reconcile', data),
+  getLeaves: (params) => api.get('/attendance/leaves', { params }),
+  applyLeave: (data) => api.post('/attendance/leaves', data),
+  reviewLeave: (id, data) => api.put(`/attendance/leaves/${id}/review`, data),
+};
+
 // ─── Dashboard ──────────────────────────────────────
 export const dashboardAPI = {
   getStats: () => api.get('/dashboard'),
@@ -149,6 +161,30 @@ export const timerAPI = {
 export const setupAPI = {
   getStatus: () => api.get('/setup/status'),
   bootstrap: () => api.post('/setup/bootstrap'),
+};
+
+// ─── Roles & Permissions ─────────────────────────────────────────────────────
+export const rolesAPI = {
+  getAll: (params) => api.get('/roles', { params }),
+  getOne: (id) => api.get(`/roles/${id}`),
+  getMyPermissions: () => api.get('/roles/my-permissions'),
+  create: (data) => api.post('/roles', data),
+  update: (id, data) => api.put(`/roles/${id}`, data),
+  remove: (id) => api.delete(`/roles/${id}`),
+  clone: (id, data) => api.post(`/roles/${id}/clone`, data),
+  getAuditLogs: (params) => api.get('/roles/audit-logs', { params }),
+};
+
+// ─── Chat ────────────────────────────────────────────────────────────────────
+export const chatAPI = {
+  getConversations: (params) => api.get('/chat/conversations', { params }),
+  createConversation: (data) => api.post('/chat/conversations', data),
+  getConversationMembers: (conversationId) => api.get(`/chat/conversations/${conversationId}/members`),
+  leaveConversation: (conversationId) => api.post(`/chat/conversations/${conversationId}/leave`),
+  getMessages: (conversationId, params) => api.get(`/chat/conversations/${conversationId}/messages`, { params }),
+  sendMessage: (conversationId, data) => api.post(`/chat/conversations/${conversationId}/messages`, data),
+  updateMessage: (messageId, data) => api.put(`/chat/messages/${messageId}`, data),
+  deleteMessage: (messageId) => api.delete(`/chat/messages/${messageId}`),
 };
 
 export default api;

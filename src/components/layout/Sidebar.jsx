@@ -4,28 +4,34 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useBranding } from '@/context/BrandingContext';
+import { useOrganizationSettings } from '@/context/OrganizationSettingsContext';
 import { cn } from '@/lib/utils';
 import {
-  IconDashboard, IconProjects, IconTasks, IconClock,
-  IconTeam, IconChart, IconClients, IconSettings, IconLogo,
+  IconDashboard, IconProjects, IconTasks, IconClock, IconAttendance,
+  IconTeam, IconChart, IconClients, IconSettings, IconLogo, IconChat,
 } from '@/components/ui/Icons';
 
 const navItems = [
-  { href: '/dashboard', label: 'Dashboard', Icon: IconDashboard, roles: ['admin', 'manager', 'member', 'client'] },
-  { href: '/projects', label: 'Projects', Icon: IconProjects, roles: ['admin', 'manager', 'member', 'client'] },
-  { href: '/tasks', label: 'Tasks', Icon: IconTasks, roles: ['admin', 'manager', 'member'] },
-  { href: '/time-tracking', label: 'Time Tracking', Icon: IconClock, roles: ['admin', 'manager', 'member'] },
-  { href: '/reports', label: 'Reports', Icon: IconChart, roles: ['admin', 'manager'] },
-  { href: '/clients', label: 'Clients', Icon: IconClients, roles: ['admin', 'manager'] },
-  { href: '/team', label: 'Team', Icon: IconTeam, roles: ['admin', 'manager'] },
-  { href: '/settings', label: 'Settings', Icon: IconSettings, roles: ['admin', 'manager', 'member'] },
+  { href: '/dashboard',     label: 'Dashboard',    Icon: IconDashboard, roles: ['super_admin', 'admin', 'hr', 'manager', 'team_lead', 'team_member', 'member', 'client'] },
+  { href: '/projects',      label: 'Projects',     Icon: IconProjects,  moduleKey: 'projects', roles: ['super_admin', 'admin', 'manager', 'team_lead', 'team_member', 'member', 'client'] },
+  { href: '/tasks',         label: 'Tasks',        Icon: IconTasks,     moduleKey: 'tasks', roles: ['super_admin', 'admin', 'hr', 'manager', 'team_lead', 'team_member', 'member'] },
+  { href: '/attendance',    label: 'Attendance',   Icon: IconAttendance, moduleKey: 'attendance', roles: ['super_admin', 'admin', 'hr', 'manager', 'team_lead', 'team_member', 'member'] },
+  { href: '/time-tracking', label: 'Time Tracking',Icon: IconClock,     moduleKey: 'timeTracking', roles: ['super_admin', 'admin', 'manager', 'team_lead', 'team_member', 'member'] },
+  { href: '/reports',       label: 'Reports',      Icon: IconChart,     moduleKey: 'reports', roles: ['super_admin', 'admin', 'hr', 'manager', 'team_lead'] },
+  { href: '/chat',          label: 'Chat',         Icon: IconChat,      moduleKey: 'chat', roles: ['super_admin', 'admin', 'hr', 'manager', 'team_lead', 'team_member', 'member'] },
+  { href: '/clients',       label: 'Clients',      Icon: IconClients,   moduleKey: 'clients', roles: ['super_admin', 'admin', 'manager'] },
+  { href: '/team',          label: 'Team',         Icon: IconTeam,      moduleKey: 'team', roles: ['super_admin', 'admin', 'hr', 'manager', 'team_lead'] },
+  { href: '/settings',      label: 'Settings',     Icon: IconSettings,  roles: ['super_admin', 'admin', 'hr', 'manager', 'team_lead', 'team_member', 'member'] },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
   const { branding, companyLogo } = useBranding();
-  const visible = navItems.filter((item) => item.roles.includes(user?.role));
+  const { isModuleEnabled } = useOrganizationSettings();
+  const visible = navItems.filter(
+    (item) => item.roles.includes(user?.role) && (!item.moduleKey || isModuleEnabled(item.moduleKey))
+  );
 
   return (
     <aside className="w-64 bg-brand-sidebar flex flex-col flex-shrink-0" style={{ backgroundColor: 'var(--brand-sidebar)' }}>

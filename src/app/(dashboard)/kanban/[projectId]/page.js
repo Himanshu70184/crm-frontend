@@ -13,7 +13,7 @@ import toast from 'react-hot-toast';
 export default function KanbanPage() {
   const { projectId } = useParams();
   const { user } = useAuth();
-  const canManagePhases = ['admin', 'manager'].includes(user?.role);
+  const canManagePhases = ['super_admin', 'admin', 'manager'].includes(user?.role);
 
   const [project, setProject] = useState(null);
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);

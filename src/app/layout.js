@@ -2,6 +2,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthContext';
 import { BrandingProvider } from '@/context/BrandingContext';
+import { OrganizationSettingsProvider } from '@/context/OrganizationSettingsContext';
 import { Toaster } from 'react-hot-toast';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -17,8 +18,10 @@ export default function RootLayout({ children }) {
       <body className={inter.className}>
         <BrandingProvider>
           <AuthProvider>
-            {children}
-            <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
+            <OrganizationSettingsProvider>
+              {children}
+              <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
+            </OrganizationSettingsProvider>
           </AuthProvider>
         </BrandingProvider>
       </body>

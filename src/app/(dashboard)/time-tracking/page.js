@@ -176,7 +176,7 @@ export default function TimeTrackingPage() {
                     </div>
                     {!log.billable && <span className="badge bg-gray-100 text-gray-500 text-xs">Non-billable</span>}
                     <span className="font-semibold text-gray-900 text-sm w-16 text-right">{log.hours}h</span>
-                    {(user?.role === 'admin' || log.user?._id === user?._id) && (
+                    {(['super_admin', 'admin'].includes(user?.role) || log.user?._id === user?._id) && (
                       <button onClick={() => handleDelete(log._id, log.hours)} className="text-gray-300 hover:text-red-500 transition-colors text-sm">✕</button>
                     )}
                   </div>

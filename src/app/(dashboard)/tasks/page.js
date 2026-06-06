@@ -13,8 +13,8 @@ import toast from 'react-hot-toast';
 
 export default function TasksPage() {
   const { user } = useAuth();
-  const canManagePhases = ['admin', 'manager'].includes(user?.role);
-  const canAddTask = ['admin', 'manager', 'member'].includes(user?.role);
+  const canManagePhases = ['super_admin', 'admin', 'manager'].includes(user?.role);
+  const canAddTask = ['super_admin', 'admin', 'manager', 'team_member', 'member'].includes(user?.role);
 
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [tasks, setTasks] = useState([]);

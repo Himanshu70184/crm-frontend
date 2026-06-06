@@ -1,6 +1,6 @@
 import { usersAPI, projectsAPI } from './api';
 
-const ASSIGNABLE_ROLES = ['admin', 'manager', 'member'];
+const ASSIGNABLE_ROLES = ['super_admin', 'admin', 'manager', 'team_member', 'member'];
 
 /** Users who can be assigned to tasks (org-wide, merged with project team). */
 export async function fetchAssignableUsers(projectId) {

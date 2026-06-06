@@ -33,7 +33,7 @@ export default function ProjectsPage() {
 
   useEffect(() => { fetchProjects(); }, [search, status]);
 
-  const canCreate = ['admin', 'manager'].includes(user?.role);
+  const canCreate = ['super_admin', 'admin', 'manager'].includes(user?.role);
 
   return (
     <div className="space-y-6">

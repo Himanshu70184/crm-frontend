@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
+import { useOrganizationSettings } from '@/context/OrganizationSettingsContext';
 import { notificationsAPI } from '@/lib/api';
 import { IconBell } from '@/components/ui/Icons';
 
@@ -11,6 +12,7 @@ const routeTitles = {
   '/dashboard': 'Dashboard',
   '/projects': 'Projects',
   '/tasks': 'Tasks',
+  '/attendance': 'Attendance',
   '/time-tracking': 'Time Tracking',
   '/reports': 'Reports & Analytics',
   '/clients': 'Clients',
@@ -21,10 +23,12 @@ const routeTitles = {
 
 export default function Navbar() {
   const { user, logout } = useAuth();
+  const { isModuleEnabled } = useOrganizationSettings();
   const router = useRouter();
   const pathname = usePathname();
   const [unread, setUnread] = useState(0);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const showNotifications = isModuleEnabled('notifications');
 
   useEffect(() => {
     notificationsAPI.getAll({ unread: true, limit: 1 })
@@ -47,17 +51,19 @@ export default function Navbar() {
       </div>
 
       <div className="flex items-center gap-2">
-        <Link
-          href="/notifications"
-          className="relative p-2.5 text-surface-500 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-colors"
-        >
-          <IconBell />
-          {unread > 0 && (
-            <span className="absolute top-2 right-2 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-              {unread > 9 ? '9+' : unread}
-            </span>
-          )}
-        </Link>
+        {showNotifications && (
+          <Link
+            href="/notifications"
+            className="relative p-2.5 text-surface-500 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-colors"
+          >
+            <IconBell />
+            {unread > 0 && (
+              <span className="absolute top-2 right-2 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                {unread > 9 ? '9+' : unread}
+              </span>
+            )}
+          </Link>
+        )}
 
         <div className="relative">
           <button

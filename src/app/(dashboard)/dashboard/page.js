@@ -19,7 +19,7 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const isAdmin = user?.role === 'admin' || user?.role === 'manager';
+  const isAdmin = ['super_admin', 'admin', 'manager'].includes(user?.role);
 
   useEffect(() => {
     dashboardAPI.getStats()
