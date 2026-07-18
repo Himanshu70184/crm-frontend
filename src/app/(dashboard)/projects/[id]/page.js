@@ -9,6 +9,94 @@ import { formatDate, TASK_STATUSES, PRIORITY_COLORS, PROJECT_STATUS_COLORS } fro
 import { useAuth } from '@/context/AuthContext';
 import toast from 'react-hot-toast';
 
+function ProjectDescriptionCard({ project, canManage, onUpdate }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!project) return;
+    setDraft(project.description || '');
+  }, [project?.description]);
+
+  const handleSave = async () => {
+    if (!project?._id) return;
+    const next = draft;
+    if ((project.description || '') === next) {
+      setEditing(false);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await projectsAPI.update(project._id, { description: next });
+      onUpdate(res.data.project);
+      toast.success('Description updated');
+      setEditing(false);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to update description');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setDraft(project?.description || '');
+    setEditing(false);
+  };
+
+  return (
+    <div className="card p-5">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="font-semibold text-gray-900">Description</h3>
+        {canManage && !editing && (
+          <button
+            type="button"
+            className="text-sm text-gray-500 hover:text-primary-600 font-medium"
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="mt-3">
+          <textarea
+            className="input min-h-[110px] text-sm"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Add a project description…"
+            autoFocus
+          />
+          <div className="flex gap-2 mt-3">
+            <button
+              type="button"
+              className="btn-primary text-sm"
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              onClick={handleCancel}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-gray-600 text-sm mt-2 whitespace-pre-wrap">
+          {project?.description || 'No description provided.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function ProjectDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -137,10 +225,7 @@ export default function ProjectDetailPage() {
       {activeTab === 'overview' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
-            <div className="card p-5">
-              <h3 className="font-semibold text-gray-900 mb-2">Description</h3>
-              <p className="text-gray-600 text-sm">{project.description || 'No description provided.'}</p>
-            </div>
+            <ProjectDescriptionCard project={project} canManage={canManage} onUpdate={setProject} />
             <div className="card p-5">
               <h3 className="font-semibold text-gray-900 mb-3">Task Summary</h3>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
