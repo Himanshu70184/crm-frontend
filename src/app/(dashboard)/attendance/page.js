@@ -35,6 +35,93 @@ function formatTime(date) {
   return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Captures a single frame from a screen share as a base64 JPEG.
+//
+// IMPORTANT BROWSER LIMITATION:
+// getDisplayMedia() ALWAYS shows the browser's native picker dialog
+// ("This Tab" / "Window" / "Entire Screen"). There is no way for a web
+// page to silently grab the full desktop (with taskbar) — the user must
+// explicitly choose "Entire Screen" in that dialog every time. This is
+// enforced by the browser itself for security and cannot be bypassed
+// from JS, even with preferCurrentTab or displaySurface hints — those
+// only set which tab is PRE-SELECTED, not force silent capture.
+//
+// Below, we hint 'monitor' as the preferred/default surface so the
+// picker opens with "Entire Screen" pre-selected, making it a single
+// click for the user to include the taskbar/search bar.
+async function captureFullScreenshot() {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    throw new Error('Screen capture is not supported in this browser');
+  }
+
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: {
+      displaySurface: 'monitor', // hint: prefer "Entire Screen" option
+    },
+    // NOTE: no preferCurrentTab / no displaySurface:'browser' — those
+    // were restricting the picker to tab-only capture.
+    audio: false,
+  });
+
+  try {
+    const track = stream.getVideoTracks()[0];
+    const settings = track.getSettings();
+
+    // Let the user know if they picked something other than full screen
+    if (settings.displaySurface && settings.displaySurface !== 'monitor') {
+      toast('Tip: choose "Entire Screen" next time to include the taskbar', {
+        icon: 'ℹ️',
+      });
+    }
+
+    const imageCapture = 'ImageCapture' in window ? new window.ImageCapture(track) : null;
+
+    let bitmap;
+    if (imageCapture) {
+      bitmap = await imageCapture.grabFrame();
+    } else {
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      await video.play();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      bitmap = video;
+    }
+
+    const rawWidth = bitmap.width || bitmap.videoWidth;
+    const rawHeight = bitmap.height || bitmap.videoHeight;
+
+    // Full-monitor captures (especially on 1440p/4K screens) produce much
+    // larger base64 strings than the old tab-only capture. The backend's
+    // sanitizeScreenshot() rejects (silently, as null) anything over
+    // ~4MB of base64, so we downscale here to keep things comfortably
+    // under that cap while still being clearly legible.
+    const MAX_DIMENSION = 1600;
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(rawWidth, rawHeight));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(rawWidth * scale);
+    canvas.height = Math.round(rawHeight * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+    // Step quality down until the encoded string fits comfortably under
+    // the backend cap (~4MB base64 chars), rather than gambling on one
+    // fixed quality value.
+    const MAX_BASE64_LENGTH = 3.5 * 1024 * 1024; // leave headroom under the 4MB backend cap
+    let quality = 0.75;
+    let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+    while (dataUrl.length > MAX_BASE64_LENGTH && quality > 0.3) {
+      quality -= 0.15;
+      dataUrl = canvas.toDataURL('image/jpeg', quality);
+    }
+
+    return dataUrl;
+  } finally {
+    stream.getTracks().forEach((t) => t.stop());
+  }
+}
+
 export default function AttendancePage() {
   const { user } = useAuth();
   const elevated = ['super_admin', 'admin', 'hr'].includes(user?.role);
@@ -45,6 +132,7 @@ export default function AttendancePage() {
   const [selfTodayRecord, setSelfTodayRecord] = useState(null);
   const [users, setUsers] = useState([]);
   const [filters, setFilters] = useState(() => ({ ...getMonthRange(), user: '' }));
+  const [viewScreenshot, setViewScreenshot] = useState(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -84,8 +172,18 @@ export default function AttendancePage() {
   const handleClock = async (type) => {
     setSaving(true);
     try {
+      let screenshot = null;
+      try {
+        screenshot = await captureFullScreenshot();
+      } catch (captureErr) {
+        toast.error('Screenshot permission denied or unavailable — continuing without it');
+      }
+
       const api = type === 'in' ? attendanceAPI.clockIn : attendanceAPI.clockOut;
-      await api({});
+      // screenshot (base64 data URL) is sent to the backend, which is
+      // responsible for decoding it and writing it into a folder on disk
+      // — see the backend snippet provided alongside this file.
+      await api(screenshot ? { screenshot } : {});
       toast.success(type === 'in' ? 'Clock in recorded' : 'Clock out recorded');
       await fetchData();
     } catch (error) {
@@ -293,6 +391,29 @@ export default function AttendancePage() {
                             <p className="text-sm font-semibold text-surface-900">{record.workMinutes ? `${(record.workMinutes / 60).toFixed(1)}h` : '—'}</p>
                           </div>
                         </div>
+
+                        {(record.clockInScreenshot || record.clockOutScreenshot) && (
+                          <div className="flex gap-2 sm:ml-2">
+                            {record.clockInScreenshot && (
+                              <button
+                                type="button"
+                                onClick={() => setViewScreenshot(record.clockInScreenshot)}
+                                className="text-xs px-2 py-1 rounded-lg border border-surface-200 text-surface-600 hover:bg-surface-100"
+                              >
+                                In shot
+                              </button>
+                            )}
+                            {record.clockOutScreenshot && (
+                              <button
+                                type="button"
+                                onClick={() => setViewScreenshot(record.clockOutScreenshot)}
+                                className="text-xs px-2 py-1 rounded-lg border border-surface-200 text-surface-600 hover:bg-surface-100"
+                              >
+                                Out shot
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -302,6 +423,20 @@ export default function AttendancePage() {
           </div>
         )}
       </div>
+
+      {viewScreenshot && (
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+          onClick={() => setViewScreenshot(null)}
+        >
+          <img
+            src={viewScreenshot}
+            alt="Attendance screenshot"
+            className="max-w-full max-h-full rounded-xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }

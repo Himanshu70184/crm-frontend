@@ -235,9 +235,7 @@ function ProjectTeamTab({ project, canManage, onUpdate }) {
 
   useEffect(() => {
     usersAPI.getAll({ limit: 200 }).then((res) => {
-      const list = (res.data.users || []).filter(
-        (u) => u.isActive !== false && ['super_admin', 'admin', 'manager', 'team_member', 'member'].includes(u.role)
-      );
+      const list = (res.data.users || []).filter((u) => u.isActive !== false);
       setAllUsers(list);
     }).catch(() => {});
   }, []);
@@ -383,4 +381,3 @@ function MilestonesTab({ project, canManage, onUpdate }) {
     </div>
   );
 }
-
