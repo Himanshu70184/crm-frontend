@@ -44,7 +44,7 @@ export default function Navbar() {
   };
 
   return (
-    <header className="h-16 glass-nav flex items-center justify-between px-6 flex-shrink-0">
+    <header className="relative z-30 h-16 glass-nav flex items-center justify-between px-6 flex-shrink-0">
       <div>
         <h2 className="text-lg font-bold text-surface-900">{title}</h2>
         <p className="text-xs text-surface-500">Hello, {user?.name?.split(' ')[0]}</p>
@@ -65,7 +65,7 @@ export default function Navbar() {
           </Link>
         )}
 
-        <div className="relative">
+        <div className="relative z-40">
           <button
             type="button"
             onClick={() => setShowUserMenu(!showUserMenu)}

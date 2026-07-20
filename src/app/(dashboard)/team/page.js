@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { usersAPI } from '@/lib/api';
 import { settingsAPI } from '@/lib/api';
 import { ROLE_COLORS, formatDate } from '@/lib/utils';
@@ -43,6 +43,15 @@ export default function TeamPage() {
 
   useEffect(() => { fetchUsers(); }, [search, roleFilter]);
   useEffect(() => { fetchShiftOptions(); }, []);
+
+  // Departments are free-text on the User model, so we derive the dropdown
+  // options from whatever departments already exist across all users.
+  // Note: this list is limited to whatever the current filtered fetch (search/roleFilter)
+  // returned, so it may miss departments outside the active filters.
+  const departmentOptions = useMemo(() => {
+    const unique = [...new Set(users.map((u) => u.department).filter(Boolean))];
+    return unique.sort();
+  }, [users]);
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this user?')) return;
@@ -135,6 +144,7 @@ export default function TeamPage() {
         <UserModal
           user={editUser}
           shiftOptions={shiftOptions}
+          departmentOptions={departmentOptions}
           onClose={() => setShowModal(false)}
           onSaved={(u) => {
             if (editUser) setUsers((prev) => prev.map((x) => x._id === u._id ? u : x));
@@ -147,7 +157,7 @@ export default function TeamPage() {
   );
 }
 
-function UserModal({ user: editUser, shiftOptions, onClose, onSaved }) {
+function UserModal({ user: editUser, shiftOptions, departmentOptions, onClose, onSaved }) {
   const [form, setForm] = useState(
     editUser
       ? {
@@ -160,6 +170,20 @@ function UserModal({ user: editUser, shiftOptions, onClose, onSaved }) {
       : { name: '', email: '', password: '', role: 'member', department: '', phone: '', shiftCode: '' }
   );
   const [loading, setLoading] = useState(false);
+  const [isNewDepartment, setIsNewDepartment] = useState(
+    Boolean(editUser?.department) && !departmentOptions.includes(editUser.department)
+  );
+
+  const handleDepartmentSelect = (e) => {
+    const value = e.target.value;
+    if (value === '__new__') {
+      setIsNewDepartment(true);
+      setForm({ ...form, department: '' });
+    } else {
+      setIsNewDepartment(false);
+      setForm({ ...form, department: value });
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -196,7 +220,37 @@ function UserModal({ user: editUser, shiftOptions, onClose, onSaved }) {
               <option value="client">Client</option>
             </select>
           </div>
-          <div><label className="label">Department</label><input className="input" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></div>
+          <div>
+            <label className="label">Department</label>
+            {isNewDepartment ? (
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder="e.g. Engineering"
+                  value={form.department}
+                  onChange={(e) => setForm({ ...form, department: e.target.value })}
+                  autoFocus
+                />
+                {departmentOptions.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs px-3"
+                    onClick={() => { setIsNewDepartment(false); setForm({ ...form, department: '' }); }}
+                  >
+                    Choose existing
+                  </button>
+                )}
+              </div>
+            ) : (
+              <select className="input" value={form.department} onChange={handleDepartmentSelect}>
+                <option value="">Select department</option>
+                {departmentOptions.map((dept) => (
+                  <option key={dept} value={dept}>{dept}</option>
+                ))}
+                <option value="__new__">+ Add new department</option>
+              </select>
+            )}
+          </div>
           <div><label className="label">Phone</label><input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
           <div>
             <label className="label">Shift</label>
