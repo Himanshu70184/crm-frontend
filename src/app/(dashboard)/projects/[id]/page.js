@@ -283,11 +283,28 @@ export default function ProjectDetailPage() {
                 <span className={`badge flex-shrink-0 ${TASK_STATUSES.find((s) => s.value === task.status)?.color}`}>
                   {TASK_STATUSES.find((s) => s.value === task.status)?.label}
                 </span>
-                {task.assignee && (
-                  <div className="w-6 h-6 rounded-full bg-primary-600 text-white text-xs flex items-center justify-center font-medium" title={task.assignee.name}>
-                    {task.assignee.name?.charAt(0).toUpperCase()}
+                {(task.assignees || task.assignee) && (
+                  <div className="flex items-center gap-1">
+                    {(() => {
+                      const assignees = Array.isArray(task.assignees) ? task.assignees : (task.assignee ? [task.assignee] : []);
+                      if (!assignees.length) return null;
+                      const top = assignees.slice(0, 2);
+                      return top.map((u, idx) => (
+                        <div
+                          key={idx}
+                          className="w-6 h-6 rounded-full bg-primary-600 text-white text-xs flex items-center justify-center font-medium -ml-1 first:ml-0"
+                          title={u.name}
+                        >
+                          {u.name?.charAt(0).toUpperCase()}
+                        </div>
+                      ));
+                    })()}
+                    {Array.isArray(task.assignees) && task.assignees.length > 2 && (
+                      <span className="text-xs text-gray-500 ml-1">+{task.assignees.length - 2}</span>
+                    )}
                   </div>
                 )}
+
                 <span className="text-xs text-gray-400 flex-shrink-0">{formatDate(task.dueDate)}</span>
               </Link>
             ))}

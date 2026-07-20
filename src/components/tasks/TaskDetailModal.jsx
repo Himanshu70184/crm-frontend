@@ -37,11 +37,18 @@ function ActionChip({ icon, label, active, onClick }) {
   );
 }
 
-function getAssigneeId(assignee) {
-  if (!assignee) return '';
-  if (typeof assignee === 'string') return assignee;
-  return assignee._id?.toString?.() || '';
+function getAssigneeId(user) {
+  if (!user) return '';
+  if (typeof user === 'string') return user;
+  return user._id?.toString?.() || '';
 }
+
+function getAssigneeIds(users) {
+  if (!users) return [];
+  if (!Array.isArray(users)) return [getAssigneeId(users)].filter(Boolean);
+  return users.map(getAssigneeId).filter(Boolean);
+}
+
 
 function PopoverPanel({ open, onClose, title, children, className = '' }) {
   const ref = useRef(null);
@@ -198,6 +205,7 @@ function collectMentionIds(text, users) {
 }
 
 function renderCommentText(text, mentions) {
+
   const mentionNames = mentions
     ?.map((mention) => mention?.name)
     .filter(Boolean)
@@ -324,6 +332,10 @@ export default function TaskDetailModal({
   const [loading, setLoading] = useState(true);
   const [showActivityDetails, setShowActivityDetails] = useState(true);
   const [activePanel, setActivePanel] = useState(null);
+  const [subtasksOpen, setSubtasksOpen] = useState(false);
+  const [activeSubtaskAssigneeIndex, setActiveSubtaskAssigneeIndex] = useState(null);
+  const [editingSubtaskIndex, setEditingSubtaskIndex] = useState(null);
+  const [editingSubtaskDraft, setEditingSubtaskDraft] = useState({ title: '', description: '' });
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -332,7 +344,8 @@ export default function TaskDetailModal({
   const [descDraft, setDescDraft] = useState('');
   const [dueEnabled, setDueEnabled] = useState(false);
   const [dueDraft, setDueDraft] = useState('');
-  const [newSubtask, setNewSubtask] = useState('');
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [newSubtaskDescription, setNewSubtaskDescription] = useState('');
   const [tagInput, setTagInput] = useState('');
   const [activityKey, setActivityKey] = useState(0);
   const [mentionState, setMentionState] = useState(null);
@@ -390,6 +403,12 @@ export default function TaskDetailModal({
       setDescDraft(t.description || '');
       setDueEnabled(!!t.dueDate);
       setDueDraft(t.dueDate ? new Date(t.dueDate).toISOString().split('T')[0] : '');
+      setSubtasksOpen(false);
+      setActiveSubtaskAssigneeIndex(null);
+      setEditingSubtaskIndex(null);
+      setEditingSubtaskDraft({ title: '', description: '' });
+      setNewSubtaskTitle('');
+      setNewSubtaskDescription('');
       setComments(cRes.data.comments || []);
       setActivities(aRes.data.activities || []);
       setTimeLogs(isTimeTrackingEnabled ? (lRes?.data?.logs || []) : []);
@@ -450,15 +469,17 @@ export default function TaskDetailModal({
     }
   };
 
-  const assignMember = async (userId) => {
+  const assignMembers = async (userIds) => {
     try {
-      const updated = await patchTask({ assignee: userId || null }, true);
-      toast.success(userId ? `Assigned to ${updated?.assignee?.name || 'member'}` : 'Task unassigned');
+      const updated = await patchTask({ assignees: userIds?.length ? userIds : [] }, true);
+      const names = (updated?.assignees || []).map((u) => u?.name).filter(Boolean);
+      toast.success(userIds?.length ? `Assigned to ${names.slice(0, 2).join(', ')}${names.length > 2 ? '…' : ''}` : 'Task unassigned');
       setActivePanel(null);
     } catch {
       /* patchTask shows toast */
     }
   };
+
 
   const handleStatusChange = async (status) => {
     try {
@@ -518,22 +539,131 @@ export default function TaskDetailModal({
     bumpActivity();
   };
 
-  const handleSubtaskToggle = async (idx) => {
+  const normalizeSubtaskPayload = (subtask, overrides = {}) => {
+    const next = { ...subtask, ...overrides };
+    const assigneeIds = getAssigneeIds(next.assignees || next.assignee);
+
+    return {
+      ...(next._id ? { _id: next._id } : {}),
+      title: (next.title || '').trim(),
+      description: (next.description || '').trim(),
+      completed: !!next.completed,
+      assignees: assigneeIds,
+    };
+  };
+
+  const persistSubtasks = async (subtasks) => {
+    try {
+      const payload = subtasks
+        .map((subtask) => normalizeSubtaskPayload(subtask))
+        .filter((subtask) => subtask.title);
+      const res = await tasksAPI.updateSubtasks(taskId, payload);
+      const updatedSubtasks = res.data?.subtasks || [];
+      let nextTaskSnapshot = null;
+
+      setTask((current) => {
+        const nextTask = { ...current, subtasks: updatedSubtasks };
+        nextTaskSnapshot = nextTask;
+        return nextTask;
+      });
+
+      if (nextTaskSnapshot) {
+        onUpdated?.(nextTaskSnapshot);
+      }
+
+      bumpActivity();
+      return updatedSubtasks;
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update subtasks');
+      throw err;
+    }
+  };
+
+  const toggleSubtaskCompleted = async (idx) => {
     const updated = task.subtasks.map((s, i) =>
       i === idx ? { ...s, completed: !s.completed } : s
     );
-    const res = await tasksAPI.updateSubtasks(taskId, updated);
-    setTask((t) => ({ ...t, subtasks: res.data.subtasks }));
-    onUpdated?.({ ...task, subtasks: res.data.subtasks });
+    await persistSubtasks(updated);
   };
 
+  const setSubtaskAssignees = async (idx, userIds) => {
+    const sanitizedIds = (userIds || []).filter(Boolean);
+    const nextSubtasks = (task?.subtasks || []).map((s, i) => {
+      if (i !== idx) return s;
+      return {
+        ...s,
+        assignees: sanitizedIds,
+      };
+    });
+
+    await persistSubtasks(nextSubtasks);
+  };
+
+
   const addSubtask = async () => {
-    if (!newSubtask.trim()) return;
-    const subtasks = [...(task.subtasks || []), { title: newSubtask.trim(), completed: false }];
-    const res = await tasksAPI.updateSubtasks(taskId, subtasks);
-    setTask((t) => ({ ...t, subtasks: res.data.subtasks }));
-    setNewSubtask('');
-    bumpActivity();
+    if (!newSubtaskTitle.trim()) return;
+    const subtasks = [
+      ...(task.subtasks || []),
+      {
+        title: newSubtaskTitle.trim(),
+        description: newSubtaskDescription.trim(),
+        completed: false,
+        assignees: [],
+      },
+    ];
+    await persistSubtasks(subtasks);
+    setNewSubtaskTitle('');
+    setNewSubtaskDescription('');
+  };
+
+  const startEditingSubtask = (idx) => {
+    const subtask = task?.subtasks?.[idx];
+    if (!subtask) return;
+    setEditingSubtaskIndex(idx);
+    setEditingSubtaskDraft({
+      title: subtask.title || '',
+      description: subtask.description || '',
+    });
+  };
+
+  const cancelSubtaskEdit = () => {
+    setEditingSubtaskIndex(null);
+    setEditingSubtaskDraft({ title: '', description: '' });
+  };
+
+  const saveSubtaskEdit = async (idx) => {
+    if (!editingSubtaskDraft.title.trim()) {
+      toast.error('Subtask title is required');
+      return;
+    }
+
+    const nextSubtasks = (task?.subtasks || []).map((subtask, subtaskIndex) =>
+      subtaskIndex === idx
+        ? {
+            ...subtask,
+            title: editingSubtaskDraft.title.trim(),
+            description: editingSubtaskDraft.description.trim(),
+          }
+        : subtask
+    );
+
+    await persistSubtasks(nextSubtasks);
+    cancelSubtaskEdit();
+  };
+
+  const removeSubtask = async (idx) => {
+    const nextSubtasks = (task?.subtasks || []).filter((_, subtaskIndex) => subtaskIndex !== idx);
+    await persistSubtasks(nextSubtasks);
+    setActiveSubtaskAssigneeIndex((current) => {
+      if (current === null) return current;
+      if (current === idx) return null;
+      return current > idx ? current - 1 : current;
+    });
+    if (editingSubtaskIndex === idx) {
+      cancelSubtaskEdit();
+    } else if (editingSubtaskIndex !== null && editingSubtaskIndex > idx) {
+      setEditingSubtaskIndex((current) => (current === null ? current : current - 1));
+    }
   };
 
   const addTag = async () => {
@@ -643,7 +773,7 @@ export default function TaskDetailModal({
       />
 
       <div
-        className="relative w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-surface-200 flex flex-col max-h-[92vh] my-auto"
+        className="relative w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-surface-200 flex flex-col max-h-[80vh] h-full my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {loading ? (
@@ -800,59 +930,80 @@ export default function TaskDetailModal({
 
                   <div className="relative">
                     <ActionChip
-                      icon="👤"
-                      label={task.assignee?.name?.split(' ')[0] || 'Members'}
+                      icon="👥"
+                      label={(() => {
+                        const ids = getAssigneeIds(task.assignees || task.assignee);
+                        if (!ids.length) return 'Members';
+                        const names = (task.assignees || task.assignee)
+                          ? (Array.isArray(task.assignees) ? task.assignees : [task.assignee])
+                            .map((u) => u?.name?.split(' ')[0])
+                            .filter(Boolean)
+                          : [];
+                        return names.length ? names.slice(0, 2).join(', ') + (names.length > 2 ? '…' : '') : 'Members';
+                      })()}
                       active={activePanel === 'members'}
                       onClick={() => setActivePanel(activePanel === 'members' ? null : 'members')}
                     />
-                    <PopoverPanel open={activePanel === 'members'} onClose={() => setActivePanel(null)} title="Assign member">
+                    <PopoverPanel open={activePanel === 'members'} onClose={() => setActivePanel(null)} title="Assign members">
                       {team.length === 0 ? (
                         <p className="text-sm text-surface-500 mb-2">
                           No users found. Add users under <strong>Team</strong> in the sidebar.
                         </p>
                       ) : (
-                        <ul className="space-y-1 max-h-52 overflow-y-auto">
-                          <li>
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs text-surface-400">Select multiple</span>
                             <button
                               type="button"
-                              onClick={() => assignMember(null)}
-                              className={`w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-surface-100 ${
-                                !getAssigneeId(task.assignee) ? 'bg-primary-50 text-primary-800 font-medium' : 'text-surface-700'
-                              }`}
+                              className="text-xs text-primary-600 hover:underline"
+                              onClick={() => assignMembers([])}
                             >
-                              Unassigned
+                              Clear
                             </button>
-                          </li>
-                          {team.map((m) => {
-                            const mid = m._id?.toString?.() || m._id;
-                            const selected = getAssigneeId(task.assignee) === mid;
-                            return (
-                              <li key={mid}>
-                                <button
-                                  type="button"
-                                  onClick={() => assignMember(mid)}
-                                  className={`w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-surface-100 flex items-center gap-2 ${
-                                    selected ? 'bg-primary-50 text-primary-800 font-medium' : 'text-surface-700'
-                                  }`}
-                                >
-                                  <span
-                                    className="w-7 h-7 rounded-full text-white text-xs flex items-center justify-center font-bold flex-shrink-0"
-                                    style={{ backgroundColor: 'var(--brand-primary)' }}
+                          </div>
+                          <ul className="space-y-1 max-h-52 overflow-y-auto">
+                            {team.map((m) => {
+                              const mid = m._id?.toString?.() || m._id;
+                              const selectedIds = getAssigneeIds(task.assignees || task.assignee);
+                              const selected = selectedIds.includes(mid);
+                              return (
+                                <li key={mid}>
+                                  <label
+                                    className={`w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-surface-100 flex items-center gap-2 cursor-pointer ${
+                                      selected ? 'bg-primary-50 text-primary-800 font-medium' : 'text-surface-700'
+                                    }`}
                                   >
-                                    {m.name?.charAt(0).toUpperCase()}
-                                  </span>
-                                  <span>
-                                    {m.name}
-                                    <span className="text-surface-400 capitalize"> · {m.role}</span>
-                                  </span>
-                                </button>
-                              </li>
-                            );
-                          })}
-                        </ul>
+                                    <input
+                                      type="checkbox"
+                                      className="rounded text-primary-600"
+                                      checked={selected}
+                                      onChange={() => {
+                                        const next = selected
+                                          ? selectedIds.filter((id) => id !== mid)
+                                          : [...selectedIds, mid];
+                                        assignMembers(next);
+                                      }}
+                                    />
+                                    <span
+                                      className="w-7 h-7 rounded-full text-white text-xs flex items-center justify-center font-bold flex-shrink-0"
+                                      style={{ backgroundColor: 'var(--brand-primary)' }}
+                                    >
+                                      {m.name?.charAt(0).toUpperCase()}
+                                    </span>
+                                    <span>
+                                      {m.name}
+                                      <span className="text-surface-400 capitalize"> · {m.role}</span>
+                                    </span>
+                                  </label>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
                       )}
                     </PopoverPanel>
                   </div>
+
 
                   <div className="relative">
                     <ActionChip
@@ -906,19 +1057,28 @@ export default function TaskDetailModal({
                     icon="☑"
                     label={
                       task.subtasks?.length
-                        ? `Checklist ${completedSubtasks}/${task.subtasks.length}`
-                        : 'Checklist'
+                        ? `Subtasks ${completedSubtasks}/${task.subtasks.length}`
+                        : 'Subtasks'
                     }
-                    active={activePanel === 'checklist'}
-                    onClick={() => setActivePanel(activePanel === 'checklist' ? null : 'checklist')}
+                    active={subtasksOpen}
+                    onClick={() => {
+                      setSubtasksOpen((current) => {
+                        const nextOpen = !current;
+                        if (!nextOpen) {
+                          setActiveSubtaskAssigneeIndex(null);
+                          cancelSubtaskEdit();
+                        }
+                        return nextOpen;
+                      });
+                    }}
                   />
                 </div>
 
-                {/* Checklist inline when open */}
-                {activePanel === 'checklist' && (
+                {/* Subtasks inline when open */}
+                {subtasksOpen && (
                   <div className="mb-6 p-4 rounded-xl border border-surface-200 bg-surface-50/50">
                     <h3 className="text-sm font-semibold text-surface-800 mb-3 flex items-center gap-2">
-                      <span>☑</span> Checklist
+                      <span>☑</span> Subtasks
                       {task.subtasks?.length > 0 && (
                         <span className="text-surface-400 font-normal">
                           {Math.round((completedSubtasks / task.subtasks.length) * 100)}%
@@ -936,32 +1096,215 @@ export default function TaskDetailModal({
                       </div>
                     )}
                     <div className="space-y-1 mb-3">
+                      {task.subtasks?.length === 0 && (
+                        <div className="rounded-xl border border-dashed border-surface-300 bg-white/70 px-4 py-5 text-sm text-surface-500">
+                          No subtasks yet. Add a title and description below to break this task into smaller work items.
+                        </div>
+                      )}
                       {(task.subtasks || []).map((sub, i) => (
-                        <label
-                          key={i}
-                          className="flex items-center gap-2 p-2 rounded-lg hover:bg-white cursor-pointer"
+                        <div
+                          key={sub._id || i}
+                          className="rounded-xl border border-surface-200 bg-white p-3"
                         >
-                          <input
-                            type="checkbox"
-                            checked={sub.completed}
-                            onChange={() => handleSubtaskToggle(i)}
-                            className="rounded text-primary-600"
-                          />
-                          <span className={`text-sm ${sub.completed ? 'line-through text-surface-400' : 'text-surface-800'}`}>
-                            {sub.title}
-                          </span>
-                        </label>
+                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                            <div className="flex items-start gap-3 flex-1 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={sub.completed}
+                                onChange={() => toggleSubtaskCompleted(i)}
+                                className="mt-1 rounded text-primary-600"
+                              />
+                              <div className="flex-1 min-w-0">
+                                {editingSubtaskIndex === i ? (
+                                  <div className="space-y-2">
+                                    <input
+                                      className="input text-sm"
+                                      value={editingSubtaskDraft.title}
+                                      onChange={(e) =>
+                                        setEditingSubtaskDraft((current) => ({
+                                          ...current,
+                                          title: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="Subtask title"
+                                    />
+                                    <textarea
+                                      className="input min-h-[88px] text-sm"
+                                      value={editingSubtaskDraft.description}
+                                      onChange={(e) =>
+                                        setEditingSubtaskDraft((current) => ({
+                                          ...current,
+                                          description: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="Add a description for this subtask…"
+                                    />
+                                  </div>
+                                ) : (
+                                  <>
+                                    <p
+                                      className={`text-sm font-medium ${
+                                        sub.completed ? 'line-through text-surface-400' : 'text-surface-800'
+                                      }`}
+                                    >
+                                      {sub.title}
+                                    </p>
+                                    {sub.description ? (
+                                      <p className="text-sm text-surface-500 mt-1 whitespace-pre-wrap">
+                                        {sub.description}
+                                      </p>
+                                    ) : (
+                                      <p className="text-xs text-surface-400 mt-1">
+                                        No description yet.
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                              <div className="relative">
+                                <button
+                                  type="button"
+                                  className="input text-xs min-w-40 text-left flex items-center justify-between gap-2 cursor-pointer"
+                                  onClick={() =>
+                                    setActiveSubtaskAssigneeIndex((current) => (current === i ? null : i))
+                                  }
+                                >
+                                  <span className="truncate">
+                                    {(() => {
+                                      const ids = getAssigneeIds(sub.assignees || sub.assignee);
+                                      if (!ids.length) return 'Assign subtask';
+                                      const names = ids
+                                        .map((id) => team.find((m) => (m._id?.toString?.() || m._id) === id)?.name)
+                                        .filter(Boolean)
+                                        .map((n) => n.split(' ')[0]);
+                                      return names.slice(0, 2).join(', ') + (names.length > 2 ? '…' : '');
+                                    })()}
+                                  </span>
+                                  <span className="text-surface-400">▾</span>
+                                </button>
+
+                                <PopoverPanel
+                                  open={activeSubtaskAssigneeIndex === i}
+                                  onClose={() => setActiveSubtaskAssigneeIndex(null)}
+                                  className="!min-w-[300px]"
+                                >
+                                  <div>
+                                    <div className="flex items-center justify-between mb-2">
+                                      <span className="text-xs text-surface-400">Select multiple</span>
+                                      <button
+                                        type="button"
+                                        className="text-xs text-primary-600 hover:underline"
+                                        onClick={() => setSubtaskAssignees(i, [])}
+                                      >
+                                        Clear
+                                      </button>
+                                    </div>
+                                    <ul className="space-y-1 max-h-52 overflow-y-auto">
+                                      {team.map((m) => {
+                                        const mid = m._id?.toString?.() || m._id;
+                                        const selectedIds = getAssigneeIds(sub.assignees || sub.assignee);
+                                        const selected = selectedIds.includes(mid);
+                                        return (
+                                          <li key={mid}>
+                                            <label
+                                              className={`w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-surface-100 flex items-center gap-2 cursor-pointer ${
+                                                selected
+                                                  ? 'bg-primary-50 text-primary-800 font-medium'
+                                                  : 'text-surface-700'
+                                              }`}
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                className="rounded text-primary-600"
+                                                checked={selected}
+                                                onChange={() => {
+                                                  const next = selected
+                                                    ? selectedIds.filter((id) => id !== mid)
+                                                    : [...selectedIds, mid];
+                                                  setSubtaskAssignees(i, next);
+                                                }}
+                                              />
+                                              <span
+                                                className="w-7 h-7 rounded-full text-white text-xs flex items-center justify-center font-bold flex-shrink-0"
+                                                style={{ backgroundColor: 'var(--brand-primary)' }}
+                                              >
+                                                {m.name?.charAt(0).toUpperCase()}
+                                              </span>
+                                              <span>
+                                                {m.name}
+                                                <span className="text-surface-400 capitalize"> · {m.role}</span>
+                                              </span>
+                                            </label>
+                                          </li>
+                                        );
+                                      })}
+                                    </ul>
+                                  </div>
+                                </PopoverPanel>
+                              </div>
+
+                              {editingSubtaskIndex === i ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn-secondary text-xs"
+                                    onClick={() => saveSubtaskEdit(i)}
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="text-xs text-surface-500 hover:text-surface-700 px-2 py-1"
+                                    onClick={cancelSubtaskEdit}
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="text-xs text-primary-600 hover:text-primary-700 px-2 py-1"
+                                  onClick={() => startEditingSubtask(i)}
+                                >
+                                  Edit
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                className="text-xs text-red-500 hover:text-red-600 px-2 py-1"
+                                onClick={() => removeSubtask(i)}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       ))}
                     </div>
-                    <div className="flex gap-2">
-                      <input
-                        className="input text-sm flex-1"
-                        placeholder="Add an item…"
-                        value={newSubtask}
-                        onChange={(e) => setNewSubtask(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSubtask())}
+                    <div className="rounded-xl border border-surface-200 bg-white p-3 space-y-3">
+                      <div>
+                        <p className="text-sm font-medium text-surface-800 mb-2">Add subtask</p>
+                        <input
+                          className="input text-sm"
+                          placeholder="Subtask title…"
+                          value={newSubtaskTitle}
+                          onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSubtask())}
+                        />
+                      </div>
+                      <textarea
+                        className="input min-h-[88px] text-sm"
+                        placeholder="Description…"
+                        value={newSubtaskDescription}
+                        onChange={(e) => setNewSubtaskDescription(e.target.value)}
                       />
-                      <button type="button" className="btn-secondary text-sm" onClick={addSubtask}>Add</button>
+                      <div className="flex justify-end">
+                        <button type="button" className="btn-secondary text-sm" onClick={addSubtask}>Add subtask</button>
+                      </div>
                     </div>
                   </div>
                 )}
