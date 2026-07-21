@@ -4,6 +4,19 @@ const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== 'undefined' ? '/api' : 'http://127.0.0.1:5000/api');
 
+// Base URL without the /api suffix — used for static assets like
+// uploaded attendance screenshots, which Express serves at the root
+// (e.g. /uploads/attendance-screenshots/xxx.jpg), not under /api.
+export const ASSET_BASE_URL = API_URL.replace(/\/api\/?$/, '');
+
+// Prefixes a relative asset path (e.g. from the backend's /uploads route)
+// with the backend origin. Leaves data URLs and absolute URLs untouched.
+export const getAssetUrl = (path) => {
+  if (!path) return '';
+  if (path.startsWith('data:') || path.startsWith('http')) return path;
+  return `${ASSET_BASE_URL}${path}`;
+};
+
 const api = axios.create({
   baseURL: API_URL,
   headers: { 'Content-Type': 'application/json' },

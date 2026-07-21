@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 import PageHeader from '@/components/ui/PageHeader';
 import StatCard from '@/components/ui/StatCard';
 import { IconAttendance, IconClock, IconChart, IconTeam } from '@/components/ui/Icons';
-import { attendanceAPI, usersAPI } from '@/lib/api';
+import { attendanceAPI, usersAPI, getAssetUrl } from '@/lib/api';
 import { formatDate, formatRelativeTime, getInitials, ROLE_COLORS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 
@@ -20,15 +20,48 @@ const STATUS_META = {
   not_clocked_in: { label: 'Not Clocked In', className: 'bg-surface-100 text-surface-600' },
 };
 
+function toISODate(date) {
+  return date.toISOString().split('T')[0];
+}
+
 function getMonthRange() {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   const end = new Date();
   return {
-    startDate: start.toISOString().split('T')[0],
-    endDate: end.toISOString().split('T')[0],
+    startDate: toISODate(start),
+    endDate: toISODate(end),
   };
 }
+
+// Preset date range calculators, keyed by dropdown value.
+const DATE_PRESETS = {
+  today: () => {
+    const now = new Date();
+    return { startDate: toISODate(now), endDate: toISODate(now) };
+  },
+  yesterday: () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return { startDate: toISODate(d), endDate: toISODate(d) };
+  },
+  last7: () => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - 6);
+    return { startDate: toISODate(start), endDate: toISODate(end) };
+  },
+  thisMonth: () => getMonthRange(),
+  custom: null,
+};
+
+const PRESET_OPTIONS = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'last7', label: 'Last 7 Days' },
+  { value: 'thisMonth', label: 'This Month' },
+  { value: 'custom', label: 'Custom Range' },
+];
 
 function formatTime(date) {
   if (!date) return '—';
@@ -131,6 +164,7 @@ export default function AttendancePage() {
   const [summary, setSummary] = useState(null);
   const [selfTodayRecord, setSelfTodayRecord] = useState(null);
   const [users, setUsers] = useState([]);
+  const [datePreset, setDatePreset] = useState('thisMonth');
   const [filters, setFilters] = useState(() => ({ ...getMonthRange(), user: '' }));
   const [viewScreenshot, setViewScreenshot] = useState(null);
 
@@ -157,6 +191,27 @@ export default function AttendancePage() {
   useEffect(() => {
     fetchData();
   }, [filters.user, filters.startDate, filters.endDate]);
+
+  // When a preset (other than Custom) is chosen, compute its date range
+  // and apply it immediately. Custom leaves the existing dates as-is and
+  // just reveals the manual pickers below.
+  const handlePresetChange = (value) => {
+    setDatePreset(value);
+    const compute = DATE_PRESETS[value];
+    if (compute) {
+      setFilters((prev) => ({ ...prev, ...compute() }));
+    }
+  };
+
+  const handleManualDateChange = (field, value) => {
+    setDatePreset('custom');
+    setFilters((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleResetRange = () => {
+    setDatePreset('thisMonth');
+    setFilters({ ...getMonthRange(), user: '' });
+  };
 
   const canClockIn = !selfTodayRecord?.clockInAt;
   const canClockOut = Boolean(selfTodayRecord?.clockInAt && !selfTodayRecord?.clockOutAt);
@@ -278,46 +333,63 @@ export default function AttendancePage() {
             <p className="text-sm text-surface-500">Scope the attendance log window</p>
           </div>
 
-          {elevated && (
-            <div>
-              <label className="label">User</label>
+          <div className="flex flex-col sm:flex-row gap-3">
+            {elevated && (
+              <div className="flex-1">
+                <label className="label">User</label>
+                <select
+                  className="input"
+                  value={filters.user}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, user: e.target.value }))}
+                >
+                  <option value="">All users</option>
+                  {users.map((item) => (
+                    <option key={item._id} value={item._id}>
+                      {item.name} ({item.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="flex-1">
+              <label className="label">Date range</label>
               <select
                 className="input"
-                value={filters.user}
-                onChange={(e) => setFilters((prev) => ({ ...prev, user: e.target.value }))}
+                value={datePreset}
+                onChange={(e) => handlePresetChange(e.target.value)}
               >
-                <option value="">All users</option>
-                {users.map((item) => (
-                  <option key={item._id} value={item._id}>
-                    {item.name} ({item.email})
-                  </option>
+                {PRESET_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
             </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label">Start date</label>
-              <input
-                type="date"
-                className="input"
-                value={filters.startDate}
-                onChange={(e) => setFilters((prev) => ({ ...prev, startDate: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="label">End date</label>
-              <input
-                type="date"
-                className="input"
-                value={filters.endDate}
-                onChange={(e) => setFilters((prev) => ({ ...prev, endDate: e.target.value }))}
-              />
-            </div>
           </div>
 
-          <button type="button" className="btn-secondary w-full" onClick={() => setFilters({ ...getMonthRange(), user: '' })}>
+          {datePreset === 'custom' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Start date</label>
+                <input
+                  type="date"
+                  className="input"
+                  value={filters.startDate}
+                  onChange={(e) => handleManualDateChange('startDate', e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label">End date</label>
+                <input
+                  type="date"
+                  className="input"
+                  value={filters.endDate}
+                  onChange={(e) => handleManualDateChange('endDate', e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <button type="button" className="btn-secondary w-full" onClick={handleResetRange}>
             Reset Range
           </button>
         </div>
@@ -430,7 +502,7 @@ export default function AttendancePage() {
           onClick={() => setViewScreenshot(null)}
         >
           <img
-            src={viewScreenshot}
+            src={getAssetUrl(viewScreenshot)}
             alt="Attendance screenshot"
             className="max-w-full max-h-full rounded-xl shadow-2xl"
             onClick={(e) => e.stopPropagation()}
