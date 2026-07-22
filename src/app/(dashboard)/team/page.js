@@ -37,7 +37,10 @@ export default function TeamPage() {
       if (search) params.search = search;
       if (roleFilter) params.role = roleFilter;
       const res = await usersAPI.getAll(params);
-      setUsers(res.data.users);
+      // Clients live in their own module (Clients page) — never show them here,
+      // even if the backend response happens to include them.
+      const nonClientUsers = (res.data.users || []).filter((u) => u.role !== 'client');
+      setUsers(nonClientUsers);
     } catch { toast.error('Failed to load team'); }
     finally { setLoading(false); }
   };
@@ -107,7 +110,6 @@ export default function TeamPage() {
           <option value="manager">Manager</option>
           <option value="team_lead">Team Lead</option>
           <option value="team_member">Team Member</option>
-          <option value="client">Client</option>
         </select>
       </div>
 
@@ -240,7 +242,6 @@ function UserModal({ user: editUser, shiftOptions, departmentOptions, onClose, o
               <option value="manager">Manager</option>
               <option value="team_lead">Team Lead</option>
               <option value="team_member">Team Member</option>
-              <option value="client">Client</option>
             </select>
           </div>
           <div>
