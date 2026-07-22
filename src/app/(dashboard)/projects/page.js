@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { projectsAPI } from '@/lib/api';
 import { formatDate, PROJECT_STATUS_COLORS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
@@ -11,12 +11,15 @@ import toast from 'react-hot-toast';
 const STATUSES = ['', 'planning', 'active', 'on_hold', 'completed', 'cancelled'];
 
 export default function ProjectsPage() {
+  const searchParams = useSearchParams();
   const [projects, setProjects] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
-  const [client, setClient] = useState(''); // holds client name (string)
+  // Initialized from ?client=<name> in the URL (e.g. linked from a Clients
+  // page card), so arriving here already filters to that client's projects.
+  const [client, setClient] = useState(() => searchParams.get('client') || '');
   const { user } = useAuth();
 
   const fetchProjects = async () => {

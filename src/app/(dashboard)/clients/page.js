@@ -128,7 +128,8 @@ export default function ClientsPage() {
                 <div className="flex justify-between flex-1 ">
                   <div>
                   <h3 className="font-semibold text-surface-900 truncate">{client.name}</h3>
-                    <a href={`mailto:${client.email}`} className="text-sm text-surface-500 truncate hover:text-primary-600 hover:underline block">{client.email}</a>                  <div className="flex items-center gap-2 mt-2">
+                  <a href={`mailto:${client.email}`} className="text-sm text-surface-500 truncate hover:text-primary-600 hover:underline block">{client.email}</a>
+                  <div className="flex items-center gap-2 mt-2">
                     <span className={`badge ${ROLE_COLORS.client}`}>Client</span>
                     <span className={`text-xs px-2 py-1 rounded-full ${client.isActive !== false ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                       {client.isActive !== false ? 'Active' : 'Inactive'}
@@ -136,7 +137,7 @@ export default function ClientsPage() {
                   </div>
                   </div>
                   <div>
-                  {client.company && <p className="text-sm font-bold text-dark truncate">{client.company}</p>}
+                  {client.company && <p className="text-xs text-surface-400 truncate">{client.company}</p>}
                   {client.phone && <p className="text-xs text-surface-400 truncate">{client.phone}</p>}
                   </div>
                   
@@ -154,11 +155,7 @@ export default function ClientsPage() {
                   className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50">Del</button>
                 {linked.length > 0 && (
                   <Link
-                    href={
-                      linked.length === 1
-                        ? `/projects/${linked[0]._id}`
-                        : `/projects?client=${encodeURIComponent(client.email)}`
-                    }
+                    href={`/projects?client=${encodeURIComponent(client.name)}`}
                     className="text-xs text-primary-600 hover:text-primary-700 font-medium px-2 py-1 rounded hover:bg-primary-50 ml-auto"
                   >
                     View Project{linked.length > 1 ? 's' : ''} ({linked.length})
@@ -166,7 +163,31 @@ export default function ClientsPage() {
                 )}
               </div>
 
-              
+              {/* <div className="mt-4 pt-4 border-t border-surface-100">
+                <p className="text-xs font-semibold text-surface-500 uppercase mb-2">
+                  Projects ({linked.length})
+                </p>
+                {linked.length ? (
+                  <ul className="space-y-2">
+                    {linked.map((p) => (
+                      <li key={p._id}>
+                        <Link href={`/projects/${p._id}`} className="flex items-center justify-between text-sm hover:text-primary-600 group">
+                          <span className="font-medium text-surface-800 group-hover:text-primary-700 truncate">{p.name}</span>
+                          <span className={`badge ml-2 ${PROJECT_STATUS_COLORS[p.status]}`}>{p.status}</span>
+                        </Link>
+                        <div className="flex items-center gap-2 mt-1">
+                          <div className="flex-1 h-1.5 bg-surface-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-primary-500 rounded-full" style={{ width: `${p.progress}%` }} />
+                          </div>
+                          <span className="text-xs text-surface-400">{p.progress}%</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-surface-400">No linked projects</p>
+                )}
+              </div> */}
             </div>
           );
         }) : (
