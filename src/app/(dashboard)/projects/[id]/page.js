@@ -430,54 +430,417 @@ function ProjectTeamTab({ project, canManage, onUpdate }) {
   );
 }
 
+const STATUS_LABELS = {
+  pending: 'Pending',
+  in_progress: 'In Progress',
+  completed: 'Completed',
+};
+
+const STATUS_BADGE_COLORS = {
+  pending: 'bg-gray-100 text-gray-600',
+  in_progress: 'bg-blue-100 text-blue-700',
+  completed: 'bg-green-100 text-green-700',
+};
+
 function MilestonesTab({ project, canManage, onUpdate }) {
   const [milestones, setMilestones] = useState(project.milestones || []);
   const [saving, setSaving] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
+  const [editingIndex, setEditingIndex] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [draft, setDraft] = useState({
+    title: '',
+    startDate: '',
+    endDate: '',
+    budget: '',
+    taxRate: '',
+  });
 
-  const addMilestone = () => {
-    if (!newTitle.trim()) return;
-    setMilestones([...milestones, { title: newTitle, status: 'pending', dueDate: '' }]);
-    setNewTitle('');
+  // Only resync local milestones when we switch to a *different* project.
+  // Watching `project.milestones` directly caused an unrelated parent
+  // re-render (e.g. background polling) to silently overwrite in-progress
+  // edits — including a just-changed status — before the user could save.
+  useEffect(() => {
+    setMilestones(project.milestones || []);
+    setEditingIndex(null);
+    setEditDraft(null);
+  }, [project._id]);
+
+  const calcTax = (m) => {
+    const budget = Number(m.budget) || 0;
+    const rate = Number(m.taxRate) || 0;
+    return (budget * rate) / 100;
   };
 
-  const save = async () => {
+  const calcTotal = (m) => (Number(m.budget) || 0) - calcTax(m);
+
+  // Persists a full milestone list to the backend and syncs local + parent state
+  // from the server's response, so what's on screen always matches what's saved.
+  const persist = async (nextMilestones) => {
     setSaving(true);
     try {
-      const res = await projectsAPI.updateMilestones(project._id, milestones);
-      onUpdate((p) => ({ ...p, milestones: res.data.milestones }));
+      const res = await projectsAPI.updateMilestones(project._id, nextMilestones);
+      setMilestones(res.data.milestones);
+      onUpdate((p) => ({
+        ...p,
+        milestones: res.data.milestones,
+        revenue: res.data.revenue ?? p.revenue,
+      }));
       toast.success('Milestones saved');
-    } catch { toast.error('Failed to save milestones'); }
-    finally { setSaving(false); }
+      return true;
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to save milestones');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateDraft = (field, value) => setDraft((d) => ({ ...d, [field]: value }));
+
+  const addMilestone = async () => {
+    if (!draft.title.trim()) return;
+    if (draft.startDate && draft.endDate && draft.endDate < draft.startDate) {
+      toast.error('End date cannot be before start date');
+      return;
+    }
+
+    const newBudget = Number(draft.budget) || 0;
+    const projectBudget = Number(project.budget) || 0;
+    const existingTotal = milestones.reduce((sum, m) => sum + (Number(m.budget) || 0), 0);
+    const remaining = projectBudget - existingTotal;
+
+    if (newBudget > remaining) {
+      toast.error(
+        `Milestone budgets can't exceed the project budget ($${projectBudget.toLocaleString()}). Remaining: $${remaining.toLocaleString()}`
+      );
+      return;
+    }
+
+    const next = [
+      ...milestones,
+      {
+        title: draft.title.trim(),
+        startDate: draft.startDate || '',
+        endDate: draft.endDate || '',
+        budget: newBudget,
+        taxRate: Number(draft.taxRate) || 0,
+        status: 'pending',
+      },
+    ];
+
+    const ok = await persist(next);
+    if (ok) setDraft({ title: '', startDate: '', endDate: '', budget: '', taxRate: '' });
+  };
+
+  const startEdit = (i) => {
+    setEditingIndex(i);
+    setEditDraft({ ...milestones[i] });
+  };
+
+  const cancelEdit = () => {
+    setEditingIndex(null);
+    setEditDraft(null);
+  };
+
+  const updateEditDraft = (field, value) => setEditDraft((d) => ({ ...d, [field]: value }));
+
+  const saveEdit = async (i) => {
+    if (editDraft.startDate && editDraft.endDate && editDraft.endDate < editDraft.startDate) {
+      toast.error('End date cannot be before start date');
+      return;
+    }
+
+    const editedBudget = Number(editDraft.budget) || 0;
+    const projectBudget = Number(project.budget) || 0;
+    const otherTotal = milestones.reduce(
+      (sum, m, j) => (j === i ? sum : sum + (Number(m.budget) || 0)),
+      0
+    );
+    const remaining = projectBudget - otherTotal;
+
+    if (editedBudget > remaining) {
+      toast.error(
+        `Milestone budgets can't exceed the project budget ($${projectBudget.toLocaleString()}). Remaining for this milestone: $${remaining.toLocaleString()}`
+      );
+      return;
+    }
+
+    const next = milestones.map((m, j) =>
+      j === i
+        ? {
+            ...editDraft,
+            budget: editedBudget,
+            taxRate: Number(editDraft.taxRate) || 0,
+          }
+        : m
+    );
+
+    const ok = await persist(next);
+    if (ok) {
+      setEditingIndex(null);
+      setEditDraft(null);
+    }
+  };
+
+  const removeMilestone = async (i) => {
+    if (!confirm('Remove this milestone?')) return;
+    const next = milestones.filter((_, j) => j !== i);
+    await persist(next);
   };
 
   return (
     <div className="space-y-4">
       <div className="card divide-y divide-gray-100">
-        {milestones.length === 0 && <p className="p-8 text-center text-gray-400">No milestones yet.</p>}
-        {milestones.map((m, i) => (
-          <div key={i} className="flex items-center gap-3 p-4">
-            <select className="input w-36 text-xs" value={m.status}
-              onChange={(e) => setMilestones(milestones.map((x, j) => j === i ? { ...x, status: e.target.value } : x))}>
-              <option value="pending">Pending</option>
-              <option value="in_progress">In Progress</option>
-              <option value="completed">Completed</option>
-            </select>
-            <span className="flex-1 text-sm font-medium text-gray-900">{m.title}</span>
-            <input type="date" className="input w-36 text-xs" value={m.dueDate?.split('T')[0] || ''}
-              onChange={(e) => setMilestones(milestones.map((x, j) => j === i ? { ...x, dueDate: e.target.value } : x))} />
-            {canManage && (
-              <button onClick={() => setMilestones(milestones.filter((_, j) => j !== i))} className="text-red-500 hover:text-red-700 text-sm px-2">✕</button>
-            )}
-          </div>
-        ))}
+        {milestones.length === 0 && (
+          <p className="p-8 text-center text-gray-400">No milestones yet.</p>
+        )}
+
+        {milestones.map((m, i) => {
+          const isEditing = editingIndex === i;
+
+          if (!isEditing) {
+            // ── View mode: read-only, nothing can change until "Edit" is clicked ──
+            return (
+              <div key={m._id || i} className="p-4 space-y-2">
+                <div className="flex justify-between items-center gap-3">
+                  <div className="flex items-center gap-3 ">
+                   <span className="flex-1 text-2xl capitalize font-bold text-gray-900">{m.title}</span>
+
+                  <span className={`badge ${STATUS_BADGE_COLORS[m.status]}`}>
+                    {STATUS_LABELS[m.status] || m.status}
+                  </span>
+                  </div>
+                  
+                  {canManage && (
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => startEdit(i)}
+                        className="text-xs text-gray-500 hover:text-primary-600 font-medium px-2 py-1"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeMilestone(i)}
+                        className="text-red-500 hover:text-red-700 text-sm px-2"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <label className="text-xs text-gray-500">Start date</label>
+                    <div className="input text-xs w-full bg-gray-50 text-gray-700 flex items-center min-h-[38px]">
+                      {m.startDate ? formatDate(m.startDate) : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500">End date</label>
+                    <div className="input text-xs w-full bg-gray-50 text-gray-700 flex items-center min-h-[38px]">
+                      {m.endDate ? formatDate(m.endDate) : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500">Budget ($)</label>
+                    <div className="input text-xs w-full bg-gray-50 text-gray-700 flex items-center min-h-[38px]">
+                      ${(m.budget || 0).toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500">Tax (%)</label>
+                    <div className="input text-xs w-full bg-gray-50 text-gray-700 flex items-center min-h-[38px]">
+                      {m.taxRate || 0}%
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500">
+                  Tax amount: <span className="font-medium text-gray-800">${calcTax(m).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                  {'  •  '}
+                  Total (after tax):{' '}
+                  <span className="font-medium text-gray-800">
+                    ${calcTotal(m).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </span>
+                  {m.status === 'completed' && (
+                    <span className="ml-2 badge bg-green-100 text-green-700">Reflected in Revenue</span>
+                  )}
+                </p>
+              </div>
+            );
+          }
+
+          // ── Edit mode: fields unlocked for this row only ──
+          return (
+            <div key={m._id || i} className="p-4 space-y-3 bg-primary-50/30">
+              <div className="flex items-center gap-3">
+                <select
+                  className="input w-36 text-xs"
+                  value={editDraft.status}
+                  onChange={(e) => updateEditDraft('status', e.target.value)}
+                >
+                  <option value="pending">Pending</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="completed">Completed</option>
+                </select>
+
+                <input
+                  className="input flex-1 text-sm"
+                  value={editDraft.title}
+                  onChange={(e) => updateEditDraft('title', e.target.value)}
+                  placeholder="Milestone name"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div>
+                  <label className="text-xs text-gray-500">Start date</label>
+                  <input
+                    type="date"
+                    className="input text-xs w-full"
+                    value={editDraft.startDate?.split('T')[0] || ''}
+                    onChange={(e) => updateEditDraft('startDate', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">End date</label>
+                  <input
+                    type="date"
+                    className="input text-xs w-full"
+                    value={editDraft.endDate?.split('T')[0] || ''}
+                    onChange={(e) => updateEditDraft('endDate', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Budget ($)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="input text-xs w-full"
+                    value={editDraft.budget}
+                    onChange={(e) => updateEditDraft('budget', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Tax (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="input text-xs w-full"
+                    value={editDraft.taxRate}
+                    onChange={(e) => updateEditDraft('taxRate', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500">
+                Tax amount: <span className="font-medium text-gray-800">${calcTax(editDraft).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                {'  •  '}
+                Total (after tax):{' '}
+                <span className="font-medium text-gray-800">
+                  ${calcTotal(editDraft).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </span>
+              </p>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => saveEdit(i)}
+                  disabled={saving}
+                  className="btn-primary text-sm"
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  disabled={saving}
+                  className="btn-secondary text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
+
       {canManage && (
-        <div className="flex gap-2">
-          <input className="input flex-1" placeholder="New milestone title…" value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addMilestone()} />
-          <button onClick={addMilestone} className="btn-secondary">Add</button>
-          <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Save'}</button>
+        <div className="card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-gray-900">Add milestone</h4>
+            <span className="text-xs text-gray-500">
+              Remaining budget:{' '}
+              <span className="font-medium text-gray-800">
+                ${Math.max(0, (Number(project.budget) || 0) - milestones.reduce((sum, m) => sum + (Number(m.budget) || 0), 0)).toLocaleString()}
+              </span>
+              {' '}/ ${(Number(project.budget) || 0).toLocaleString()}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <input
+              className="input sm:col-span-2"
+              placeholder="Milestone name"
+              value={draft.title}
+              onChange={(e) => updateDraft('title', e.target.value)}
+            />
+
+            <div>
+              <label className="text-xs text-gray-500">Start date</label>
+              <input
+                type="date"
+                className="input w-full"
+                value={draft.startDate}
+                onChange={(e) => updateDraft('startDate', e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">End date</label>
+              <input
+                type="date"
+                className="input w-full"
+                value={draft.endDate}
+                onChange={(e) => updateDraft('endDate', e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500">Budget ($)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className="input w-full"
+                placeholder="0.00"
+                value={draft.budget}
+                onChange={(e) => updateDraft('budget', e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">Tax (%)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className="input w-full"
+                placeholder="0"
+                value={draft.taxRate}
+                onChange={(e) => updateDraft('taxRate', e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button type="button" onClick={addMilestone} disabled={saving} className="btn-primary">
+              {saving ? 'Adding…' : 'Add milestone'}
+            </button>
+          </div>
         </div>
       )}
     </div>
