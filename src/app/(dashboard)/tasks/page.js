@@ -129,20 +129,31 @@ export default function TasksPage() {
         </div>
       </div>
 
+      {/*
+        This wrapper is the key fix:
+        - h-full + min-h-0 lock its height to the space left by the header above,
+          instead of growing with the board's content.
+        - overflow-x-auto gives it the horizontal scrollbar, which now sits at a
+          FIXED position at the bottom of this box (not the bottom of all content).
+        - overflow-y-hidden stops this outer box from also scrolling vertically —
+          vertical scrolling should happen per-column inside KanbanBoard instead.
+      */}
       <div className="flex-1 min-h-0 px-6 py-4">
         {loading ? (
           <div className="flex justify-center py-24">
             <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary-200 border-t-primary-600" />
           </div>
         ) : (
-          <KanbanBoard
-            columns={columns}
-            tasks={tasks}
-            onTasksChange={setTasks}
-            onMoveTask={handleMoveTask}
-            showProject={!filters.project}
-            onOpenTask={setSelectedTaskId}
-          />
+          <div className="h-full min-h-0 overflow-x-auto overflow-y-hidden">
+            <KanbanBoard
+              columns={columns}
+              tasks={tasks}
+              onTasksChange={setTasks}
+              onMoveTask={handleMoveTask}
+              showProject={!filters.project}
+              onOpenTask={setSelectedTaskId}
+            />
+          </div>
         )}
       </div>
 

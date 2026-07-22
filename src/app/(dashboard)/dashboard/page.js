@@ -81,12 +81,18 @@ export default function DashboardPage() {
           <h3 className="font-semibold text-surface-900 mb-4">Task Completion (7 Days)</h3>
           {stats.trend?.length ? (
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={stats.trend}>
+              <BarChart data={stats.trend} barCategoryGap="20%">
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="_id" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="count" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                <Bar
+                  dataKey="count"
+                  fill="#6366f1"
+                  radius={[6, 6, 0, 0]}
+                  barSize={32}
+                  maxBarSize={40}
+                />
               </BarChart>
             </ResponsiveContainer>
           ) : (

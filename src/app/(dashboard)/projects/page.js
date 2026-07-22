@@ -11,9 +11,11 @@ const STATUSES = ['', 'planning', 'active', 'on_hold', 'completed', 'cancelled']
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
+  const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [client, setClient] = useState(''); // holds client name (string)
   const { user } = useAuth();
 
   const fetchProjects = async () => {
@@ -22,6 +24,7 @@ export default function ProjectsPage() {
       const params = {};
       if (search) params.search = search;
       if (status) params.status = status;
+      if (client) params.client = client;
       const res = await projectsAPI.getAll(params);
       setProjects(res.data.projects);
     } catch {
@@ -31,7 +34,20 @@ export default function ProjectsPage() {
     }
   };
 
-  useEffect(() => { fetchProjects(); }, [search, status]);
+  // Distinct client names load karo dropdown ke liye
+  useEffect(() => {
+    const fetchClients = async () => {
+      try {
+        const res = await projectsAPI.getClients();
+        setClients(res.data.clients || []);
+      } catch (err) {
+        console.error('Client fetch failed:', err);
+      }
+    };
+    fetchClients();
+  }, []);
+
+  useEffect(() => { fetchProjects(); }, [search, status, client]);
 
   const canCreate = ['super_admin', 'admin', 'manager'].includes(user?.role);
 
@@ -59,6 +75,12 @@ export default function ProjectsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <select className="input w-56" value={client} onChange={(e) => setClient(e.target.value)}>
+          <option value="">All clients</option>
+          {clients.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+        </select>
         <select className="input w-48" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">All statuses</option>
           {STATUSES.slice(1).map((s) => (
@@ -99,9 +121,11 @@ function ProjectCard({ project }) {
       </div>
 
       <h3 className="font-semibold text-gray-900 mb-1 truncate">{project.name}</h3>
+      {project.client?.name && (
+        <p className="text-xs text-primary-600 font-medium mb-1">{project.client.name}</p>
+      )}
       <p className="text-sm text-gray-500 line-clamp-2 mb-4">{project.description || 'No description'}</p>
 
-      {/* Progress bar */}
       <div className="mb-4">
         <div className="flex justify-between text-xs text-gray-500 mb-1">
           <span>Progress</span>
@@ -112,7 +136,6 @@ function ProjectCard({ project }) {
         </div>
       </div>
 
-      {/* Footer */}
       <div className="flex items-center justify-between text-xs text-gray-500">
         <span>Due {formatDate(project.endDate)}</span>
         <div className="flex -space-x-2">

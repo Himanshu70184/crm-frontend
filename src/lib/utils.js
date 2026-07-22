@@ -21,7 +21,7 @@ export const PROJECT_STATUS_COLORS = {
 export const ROLE_COLORS = {
   super_admin: 'bg-red-100 text-red-700',
   admin:       'bg-purple-100 text-purple-700',
-  hr:          'bg-cyan-100 text-cyan-700',
+  hr:          'bg-pink-100 text-pink-700',
   manager:     'bg-blue-100 text-blue-700',
   team_lead:   'bg-emerald-100 text-emerald-700',
   team_member: 'bg-gray-100 text-gray-700',

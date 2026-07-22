@@ -75,17 +75,24 @@ export default function KanbanBoard({
       onDragStart={({ active }) => setActiveTask(tasks.find((t) => t._id === active.id) || null)}
       onDragEnd={handleDragEnd}
     >
-      <div className="kanban-scroll flex gap-4 min-h-[calc(100vh-240px)] pb-4 px-1 w-full">
+      {/*
+        h-full instead of min-h-[calc(100vh-...)]:
+        this makes the board fill EXACTLY the height its parent gives it
+        (the fixed-height wrapper in TasksPage), never taller. That parent
+        already owns the overflow-x-auto scrollbar, so this div must never
+        grow past it or the scrollbar position becomes unstable.
+      */}
+      <div className="kanban-scroll flex gap-4 h-full pb-4 px-1 w-full">
         <div className="flex gap-4 min-w-max h-full">
-        {safeColumns.map((col) => (
-          <KanbanColumn
-            key={col.id}
-            column={col}
-            tasks={getColumnTasks(col.id)}
-            showProject={showProject}
-            onOpenTask={onOpenTask}
-          />
-        ))}
+          {safeColumns.map((col) => (
+            <KanbanColumn
+              key={col.id}
+              column={col}
+              tasks={getColumnTasks(col.id)}
+              showProject={showProject}
+              onOpenTask={onOpenTask}
+            />
+          ))}
         </div>
       </div>
       <DragOverlay>
@@ -109,11 +116,11 @@ function KanbanColumn({ column, tasks, showProject, onOpenTask }) {
   return (
     <div
       ref={setNodeRef}
-      className={`w-[280px] flex-shrink-0 flex flex-col rounded-2xl border transition-colors ${
+      className={`w-[280px] flex-shrink-0 h-full flex flex-col rounded-2xl border transition-colors ${
         isOver ? 'border-primary-400 bg-primary-50/40' : atWip ? 'border-amber-300 bg-amber-50/30' : 'border-surface-200 bg-surface-50'
       }`}
     >
-      <div className="p-3 flex items-center justify-between border-b border-surface-200/80">
+      <div className="p-3 flex items-center justify-between border-b border-surface-200/80 flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${style.header}`} />
           <span className="font-semibold text-surface-800 text-sm truncate">{column.label}</span>
@@ -125,7 +132,13 @@ function KanbanColumn({ column, tasks, showProject, onOpenTask }) {
       </div>
 
       <SortableContext items={tasks.map((t) => t._id)} strategy={verticalListSortingStrategy}>
-        <div className="flex-1 p-2 space-y-2 overflow-y-auto max-h-[calc(100vh-220px)] min-h-[120px]">
+        {/*
+          flex-1 + min-h-0 is what makes THIS div (not the column, not the board)
+          the one that scrolls vertically. min-h-0 is required — without it a
+          flex child refuses to shrink below its content height, which is the
+          classic reason "overflow-y-auto" silently does nothing in a flex column.
+        */}
+        <div className="flex-1 min-h-0 p-2 space-y-2 overflow-y-auto">
           {tasks.map((task) => (
             <SortableTaskCard
               key={task._id}

@@ -164,8 +164,8 @@ export default function AttendancePage() {
   const [summary, setSummary] = useState(null);
   const [selfTodayRecord, setSelfTodayRecord] = useState(null);
   const [users, setUsers] = useState([]);
-  const [datePreset, setDatePreset] = useState('thisMonth');
-  const [filters, setFilters] = useState(() => ({ ...getMonthRange(), user: '' }));
+  const [datePreset, setDatePreset] = useState('today');
+  const [filters, setFilters] = useState(() => ({ ...DATE_PRESETS.today(), user: '' }));
   const [viewScreenshot, setViewScreenshot] = useState(null);
 
   const fetchData = async () => {

@@ -5,13 +5,18 @@ import Link from 'next/link';
 import { usersAPI, projectsAPI } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { ROLE_COLORS, PROJECT_STATUS_COLORS, formatDate } from '@/lib/utils';
+import toast from 'react-hot-toast';
 
 export default function ClientsPage() {
   const [clients, setClients] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: '', email: '', company: '', phone: '' });
 
-  useEffect(() => {
+  const fetchData = () => {
+    setLoading(true);
     Promise.all([
       usersAPI.getAll({ role: 'client' }),
       projectsAPI.getAll({ limit: 100 }),
@@ -22,10 +27,31 @@ export default function ClientsPage() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { fetchData(); }, []);
 
   const projectsForClient = (email) =>
     projects.filter((p) => p.client?.email === email);
+
+  const handleAddClient = async (e) => {
+    e.preventDefault();
+    if (!form.name || !form.email) {
+      return toast.error('Name and email are required');
+    }
+    setSaving(true);
+    try {
+      await usersAPI.create({ ...form, role: 'client' });
+      toast.success('Client added!');
+      setForm({ name: '', email: '', company: '', phone: '' });
+      setIsModalOpen(false);
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to add client');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -37,10 +63,15 @@ export default function ClientsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Clients"
-        subtitle="Client accounts and linked projects for your service organization"
-      />
+      <div className="flex items-center justify-between">
+        <PageHeader
+          title="Clients"
+          subtitle="Client accounts and linked projects for your service organization"
+        />
+        <button className="btn-primary" onClick={() => setIsModalOpen(true)}>
+          + Add Client
+        </button>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {clients.length ? clients.map((client) => {
@@ -90,6 +121,45 @@ export default function ClientsPage() {
           </div>
         )}
       </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-lg text-surface-900">Add Client</h2>
+              <button onClick={() => setIsModalOpen(false)} className="text-surface-400 hover:text-surface-600">✕</button>
+            </div>
+            <form onSubmit={handleAddClient} className="space-y-4">
+              <div>
+                <label className="label">Name *</label>
+                <input className="input" value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+              </div>
+              <div>
+                <label className="label">Email *</label>
+                <input className="input" type="email" value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+              </div>
+              <div>
+                <label className="label">Company</label>
+                <input className="input" value={form.company}
+                  onChange={(e) => setForm({ ...form, company: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Phone</label>
+                <input className="input" value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+              </div>
+              <div className="flex gap-3 justify-end pt-2">
+                <button type="button" className="btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
+                <button type="submit" className="btn-primary" disabled={saving}>
+                  {saving ? 'Adding…' : 'Add Client'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

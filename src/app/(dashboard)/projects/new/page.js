@@ -38,8 +38,19 @@ export default function NewProjectPage() {
   const teamDropdownRef = useRef(null);
   const memberDropdownRef = useRef(null);
 
+  // Client dropdown state
+  const [clientsList, setClientsList] = useState([]);
+  const [selectedClientId, setSelectedClientId] = useState('');
+
   useEffect(() => {
     usersAPI.getAll({ limit: 100 }).then((res) => setUsers(res.data.users)).catch(() => {});
+  }, []);
+
+  // Fetch existing clients (role: 'client') for dropdown
+  useEffect(() => {
+    usersAPI.getAll({ role: 'client', limit: 100 })
+      .then((res) => setClientsList(res.data.users || []))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -81,6 +92,22 @@ export default function NewProjectPage() {
       ...f,
       team: f.team.includes(userId) ? f.team.filter((id) => id !== userId) : [...f.team, userId],
     }));
+  };
+
+  // Populate client details from the selected dropdown option
+  const handleClientSelect = (id) => {
+    setSelectedClientId(id);
+    if (!id) {
+      setForm((f) => ({ ...f, client: { name: '', email: '', company: '' } }));
+      return;
+    }
+    const c = clientsList.find((u) => u._id === id);
+    if (c) {
+      setForm((f) => ({
+        ...f,
+        client: { name: c.name || '', email: c.email || '', company: c.company || '' },
+      }));
+    }
   };
 
   const teamDropdownLabel = selectedTeams.length === 0
@@ -271,23 +298,16 @@ export default function NewProjectPage() {
         </div>
 
         <div className="card p-6 space-y-4">
-          <h2 className="font-semibold text-gray-900">Client Details (Optional)</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">Client Name</label>
-              <input className="input" placeholder="John Smith" value={form.client.name}
-                onChange={(e) => setForm({ ...form, client: { ...form.client, name: e.target.value } })} />
-            </div>
-            <div>
-              <label className="label">Client Email</label>
-              <input className="input" type="email" placeholder="client@company.com" value={form.client.email}
-                onChange={(e) => setForm({ ...form, client: { ...form.client, email: e.target.value } })} />
-            </div>
-          </div>
+          <h2 className="font-semibold text-gray-900">Client (Optional)</h2>
+
           <div>
-            <label className="label">Company</label>
-            <input className="input" placeholder="Acme Corp" value={form.client.company}
-              onChange={(e) => setForm({ ...form, client: { ...form.client, company: e.target.value } })} />
+            <label className="label">Select Client</label>
+            <select className="input" value={selectedClientId} onChange={(e) => handleClientSelect(e.target.value)}>
+              <option value="">Select a Client</option>
+              {clientsList.map((c) => (
+                <option key={c._id} value={c._id}>{c.name} </option>
+              ))}
+            </select>
           </div>
         </div>
 

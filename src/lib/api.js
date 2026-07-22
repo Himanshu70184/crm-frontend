@@ -74,6 +74,7 @@ export const usersAPI = {
 export const projectsAPI = {
   getAll: (params) => api.get('/projects', { params }),
   getOne: (id) => api.get(`/projects/${id}`),
+  getClients: () => api.get('/projects/clients'), // NEW — add kiya
   create: (data) => api.post('/projects', data),
   update: (id, data) => api.put(`/projects/${id}`, data),
   remove: (id) => api.delete(`/projects/${id}`),
@@ -81,7 +82,6 @@ export const projectsAPI = {
   updateKanban: (id, kanbanConfig) => api.put(`/projects/${id}/kanban`, { kanbanConfig }),
   getStats: (id) => api.get(`/projects/${id}/stats`),
 };
-
 // ─── Tasks ──────────────────────────────────────────
 export const tasksAPI = {
   getAll: (params) => api.get('/tasks', { params }),

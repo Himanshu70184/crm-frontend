@@ -7,6 +7,17 @@ import { ROLE_COLORS, formatDate } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import toast from 'react-hot-toast';
 
+// Displays roles in Title Case (e.g. "team_member" -> "Team Member"),
+// with a special case for "hr" which should always render as "HR".
+function formatRole(role) {
+  if (!role) return '';
+  if (role.toLowerCase() === 'hr') return 'HR';
+  return role
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
 export default function TeamPage() {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
@@ -111,7 +122,7 @@ export default function TeamPage() {
                 <div className="w-12 h-12 rounded-full bg-primary-600 text-white text-lg flex items-center justify-center font-bold">
                   {u.name?.charAt(0).toUpperCase()}
                 </div>
-                <span className={`badge ${ROLE_COLORS[u.role]}`}>{u.role}</span>
+                <span className={`badge ${ROLE_COLORS[u.role]}`}>{formatRole(u.role)}</span>
               </div>
               <h3 className="font-semibold text-gray-900">{u.name}</h3>
               <p className="text-sm text-gray-500 truncate">{u.email}</p>
