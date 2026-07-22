@@ -128,8 +128,7 @@ export default function ClientsPage() {
                 <div className="flex justify-between flex-1 ">
                   <div>
                   <h3 className="font-semibold text-surface-900 truncate">{client.name}</h3>
-                  <p className="text-sm text-surface-500 truncate">{client.email}</p>
-                  <div className="flex items-center gap-2 mt-2">
+                    <a href={`mailto:${client.email}`} className="text-sm text-surface-500 truncate hover:text-primary-600 hover:underline block">{client.email}</a>                  <div className="flex items-center gap-2 mt-2">
                     <span className={`badge ${ROLE_COLORS.client}`}>Client</span>
                     <span className={`text-xs px-2 py-1 rounded-full ${client.isActive !== false ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                       {client.isActive !== false ? 'Active' : 'Inactive'}

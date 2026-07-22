@@ -97,6 +97,103 @@ function ProjectDescriptionCard({ project, canManage, onUpdate }) {
   );
 }
 
+function ProjectBudgetField({ project, canEdit, onUpdate }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(project?.budget != null ? String(project.budget) : '');
+  }, [project?.budget]);
+
+  const handleSave = async () => {
+    if (!project?._id) return;
+    const nextValue = Number(draft);
+    if (draft === '' || Number.isNaN(nextValue) || nextValue < 0) {
+      toast.error('Enter a valid budget amount');
+      return;
+    }
+    if (nextValue === (project.budget || 0)) {
+      setEditing(false);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await projectsAPI.update(project._id, { budget: nextValue });
+      onUpdate(res.data.project);
+      toast.success('Budget updated');
+      setEditing(false);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to update budget');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setDraft(project?.budget != null ? String(project.budget) : '');
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex justify-between items-center gap-2">
+        <dt className="text-gray-500">Budget</dt>
+        <dd className="flex items-center gap-1">
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            autoFocus
+            className="input text-xs w-28 py-1"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSave();
+              if (e.key === 'Escape') handleCancel();
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="text-xs text-primary-600 hover:text-primary-700 font-medium px-1"
+          >
+            {saving ? '…' : 'Save'}
+          </button>
+          <button
+            type="button"
+            onClick={handleCancel}
+            disabled={saving}
+            className="text-xs text-gray-400 hover:text-gray-600 px-1"
+          >
+            Cancel
+          </button>
+        </dd>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-between items-center">
+      <dt className="text-gray-500">Budget</dt>
+      <dd className="flex items-center gap-2">
+        <span className="font-medium">${project.budget?.toLocaleString() || 0}</span>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="text-xs text-gray-400 hover:text-primary-600 font-medium"
+          >
+            Edit
+          </button>
+        )}
+      </dd>
+    </div>
+  );
+}
+
 export default function ProjectDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -243,7 +340,7 @@ export default function ProjectDetailPage() {
               <h3 className="font-semibold text-gray-900 mb-3">Details</h3>
               <dl className="space-y-2 text-sm">
                 {canViewBudget && (
-                  <div className="flex justify-between"><dt className="text-gray-500">Budget</dt><dd className="font-medium">${project.budget?.toLocaleString() || 0}</dd></div>
+                  <ProjectBudgetField project={project} canEdit={canManage} onUpdate={setProject} />
                 )}
                 <div className="flex justify-between"><dt className="text-gray-500">Manager</dt><dd className="font-medium">{project.owner?.name}</dd></div>
                 <div className="flex justify-between"><dt className="text-gray-500">Priority</dt><dd><span className={`badge ${PRIORITY_COLORS[project.priority]}`}>{project.priority}</span></dd></div>

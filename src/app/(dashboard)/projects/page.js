@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { projectsAPI } from '@/lib/api';
 import { formatDate, PROJECT_STATUS_COLORS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
@@ -50,6 +51,20 @@ export default function ProjectsPage() {
   useEffect(() => { fetchProjects(); }, [search, status, client]);
 
   const canCreate = ['super_admin', 'admin', 'manager'].includes(user?.role);
+  const canChangeStatus = ['super_admin', 'admin', 'manager'].includes(user?.role);
+
+  // Called from a card's status dropdown. Updates the backend, then syncs
+  // just that one project in local state from the server's response so the
+  // card reflects the change immediately without a full refetch.
+  const handleStatusChange = async (projectId, newStatus) => {
+    try {
+      const res = await projectsAPI.update(projectId, { status: newStatus });
+      setProjects((prev) => prev.map((p) => (p._id === projectId ? res.data.project : p)));
+      toast.success(`Status changed to ${newStatus.replace('_', ' ')}`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update status');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -100,7 +115,12 @@ export default function ProjectsPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {projects.map((project) => (
-            <ProjectCard key={project._id} project={project} />
+            <ProjectCard
+              key={project._id}
+              project={project}
+              canChangeStatus={canChangeStatus}
+              onStatusChange={handleStatusChange}
+            />
           ))}
         </div>
       )}
@@ -108,16 +128,56 @@ export default function ProjectsPage() {
   );
 }
 
-function ProjectCard({ project }) {
+function ProjectCard({ project, canChangeStatus, onStatusChange }) {
+  const router = useRouter();
+  const [updating, setUpdating] = useState(false);
+
+  const goToProject = () => router.push(`/projects/${project._id}`);
+
+  const handleStatusSelect = async (e) => {
+    const newStatus = e.target.value;
+    if (newStatus === project.status) return;
+    if (!confirm(`Change status to "${newStatus.replace('_', ' ')}"? This may affect linked tasks and milestones.`)) {
+      return;
+    }
+    setUpdating(true);
+    try {
+      await onStatusChange(project._id, newStatus);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   return (
-    <Link href={`/projects/${project._id}`} className="card p-5 hover:shadow-md transition-shadow block">
+    <div
+      onClick={goToProject}
+      role="link"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter') goToProject(); }}
+      className="card p-5 hover:shadow-md transition-shadow block cursor-pointer"
+    >
       <div className="flex items-start justify-between mb-3">
         <div className="w-10 h-10 bg-primary-100 text-primary-700 rounded-xl flex items-center justify-center font-bold flex-shrink-0">
           {project.name.charAt(0).toUpperCase()}
         </div>
-        <span className={`badge ${PROJECT_STATUS_COLORS[project.status]}`}>
-          {project.status.replace('_', ' ')}
-        </span>
+
+        {canChangeStatus ? (
+          <select
+            value={project.status}
+            onClick={(e) => e.stopPropagation()}
+            onChange={handleStatusSelect}
+            disabled={updating}
+            className={`badge border-0 cursor-pointer capitalize pr-6 ${PROJECT_STATUS_COLORS[project.status]}`}
+          >
+            {STATUSES.slice(1).map((s) => (
+              <option key={s} value={s}>{s.replace('_', ' ')}</option>
+            ))}
+          </select>
+        ) : (
+          <span className={`badge ${PROJECT_STATUS_COLORS[project.status]}`}>
+            {project.status.replace('_', ' ')}
+          </span>
+        )}
       </div>
 
       <h3 className="font-semibold text-gray-900 mb-1 truncate">{project.name}</h3>
@@ -151,6 +211,6 @@ function ProjectCard({ project }) {
           )}
         </div>
       </div>
-    </Link>
+    </div>
   );
 }

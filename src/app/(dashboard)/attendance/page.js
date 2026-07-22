@@ -68,6 +68,31 @@ function formatTime(date) {
   return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Converts a minute count into the same "X.Xh" hour format already used
+// for worked hours, so late time reads consistently instead of a raw
+// minute count (e.g. 237 -> "4.0h" instead of "237 min").
+function formatMinutesAsHours(minutes) {
+  const value = Number(minutes) || 0;
+  return `${(value / 60).toFixed(1)}h`;
+}
+
+// Precise "Xh Ym Zs" breakdown of a worked-duration value expressed in
+// minutes (which may carry a fractional part representing seconds, e.g.
+// 144.5 minutes = 2h 24m 30s). Used anywhere a single session/day's
+// worked time is shown, so it reads exactly rather than a rounded decimal.
+function formatWorkedDuration(minutesValue) {
+  const totalMinutes = Number(minutesValue) || 0;
+  const totalSeconds = Math.round(totalMinutes * 60);
+  const hrs = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  const parts = [];
+  if (hrs > 0) parts.push(`${hrs}h`);
+  parts.push(`${mins}m`);
+  parts.push(`${secs}s`);
+  return parts.join(' ');
+}
+
 // Captures a single frame from a screen share as a base64 JPEG.
 //
 // IMPORTANT BROWSER LIMITATION:
@@ -310,11 +335,11 @@ export default function AttendancePage() {
               <div className="rounded-2xl border border-surface-200 bg-surface-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-surface-400 mb-1">Worked</p>
                 <p className="text-lg font-semibold text-surface-900">
-                  {selfTodayRecord.workMinutes ? `${(selfTodayRecord.workMinutes / 60).toFixed(1)}h` : '0.0h'}
+                  {selfTodayRecord.workMinutes ? formatWorkedDuration(selfTodayRecord.workMinutes) : '0m 0s'}
                 </p>
                 <p className="text-xs text-surface-500 mt-1">
                   {selfTodayRecord.shiftName || 'Default shift'}
-                  {selfTodayRecord.isLate ? ` • Late by ${selfTodayRecord.lateMinutes || 0} min` : ''}
+                  {selfTodayRecord.isLate ? ` • Late by ${formatMinutesAsHours(selfTodayRecord.lateMinutes)}` : ''}
                   {selfTodayRecord.isHalfDay ? ' • Half day' : ''}
                 </p>
               </div>
@@ -420,7 +445,7 @@ export default function AttendancePage() {
                   <h4 className="font-medium text-surface-900">{dateLabel}</h4>
                   <span className="text-xs text-surface-500">
                     {dateRecords.reduce((sum, record) => sum + (record.workMinutes || 0), 0) > 0
-                      ? `${(dateRecords.reduce((sum, record) => sum + (record.workMinutes || 0), 0) / 60).toFixed(1)}h`
+                      ? formatWorkedDuration(dateRecords.reduce((sum, record) => sum + (record.workMinutes || 0), 0))
                       : 'No work duration'}
                   </span>
                 </div>
@@ -438,7 +463,7 @@ export default function AttendancePage() {
                               <p className="font-medium text-surface-900 truncate">{record.user?.name}</p>
                               <span className={`badge ${ROLE_COLORS[record.user?.role] || ROLE_COLORS.team_member}`}>{record.user?.role}</span>
                               <span className={`badge ${status.className}`}>{status.label}</span>
-                              {record.isLate && <span className="badge bg-amber-100 text-amber-700">Late {record.lateMinutes ? `(${record.lateMinutes}m)` : ''}</span>}
+                              {record.isLate && <span className="badge bg-amber-100 text-amber-700">Late {record.lateMinutes ? `(${formatMinutesAsHours(record.lateMinutes)})` : ''}</span>}
                               {record.isHalfDay && <span className="badge bg-blue-100 text-blue-700">Half Day</span>}
                             </div>
                             <p className="text-xs text-surface-500 truncate">
@@ -460,7 +485,7 @@ export default function AttendancePage() {
                           </div>
                           <div>
                             <p className="text-[11px] uppercase text-surface-400">Worked</p>
-                            <p className="text-sm font-semibold text-surface-900">{record.workMinutes ? `${(record.workMinutes / 60).toFixed(1)}h` : '—'}</p>
+                            <p className="text-sm font-semibold text-surface-900">{record.workMinutes ? formatWorkedDuration(record.workMinutes) : '—'}</p>
                           </div>
                         </div>
 
