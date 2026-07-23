@@ -195,7 +195,18 @@ export const chatAPI = {
   getConversationMembers: (conversationId) => api.get(`/chat/conversations/${conversationId}/members`),
   leaveConversation: (conversationId) => api.post(`/chat/conversations/${conversationId}/leave`),
   getMessages: (conversationId, params) => api.get(`/chat/conversations/${conversationId}/messages`, { params }),
-  sendMessage: (conversationId, data) => api.post(`/chat/conversations/${conversationId}/messages`, data),
+  sendMessage: (conversationId, data) => {
+    // When data is FormData (attachments present), delete the Content-Type
+    // header so the browser sets 'multipart/form-data; boundary=...' itself.
+    // Setting it manually (like tasksAPI.uploadAttachment does) omits the
+    // boundary and breaks multer's parsing.
+    const isFormData = typeof FormData !== 'undefined' && data instanceof FormData;
+    return api.post(
+      `/chat/conversations/${conversationId}/messages`,
+      data,
+      isFormData ? { headers: { 'Content-Type': undefined } } : undefined
+    );
+  },
   updateMessage: (messageId, data) => api.put(`/chat/messages/${messageId}`, data),
   deleteMessage: (messageId) => api.delete(`/chat/messages/${messageId}`),
 };

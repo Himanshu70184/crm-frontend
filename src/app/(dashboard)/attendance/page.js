@@ -205,7 +205,12 @@ export default function AttendancePage() {
       setRecords(attendanceRes.data.records || []);
       setSummary(attendanceRes.data.summary || null);
       setSelfTodayRecord(selfTodayRes.data.record || null);
-      setUsers((usersRes.data.users || []).filter((item) => item.isActive !== false));
+      // Clients don't clock in/out, so exclude them from the filter dropdown.
+      setUsers(
+        (usersRes.data.users || []).filter(
+          (item) => item.isActive !== false && item.role !== 'client'
+        )
+      );
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to load attendance');
     } finally {

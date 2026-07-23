@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { chatAPI, usersAPI } from '@/lib/api';
+import { chatAPI, usersAPI, getAssetUrl } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import usePermission from '@/hooks/usePermission';
 import toast from 'react-hot-toast';
@@ -19,6 +19,99 @@ function initials(name = '') {
 function formatTime(v) {
   if (!v) return '';
   return new Date(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function dateKey(v) {
+  const d = new Date(v);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function formatDateLabel(v) {
+  const d = new Date(v);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (dateKey(d) === dateKey(today)) return 'Today';
+  if (dateKey(d) === dateKey(yesterday)) return 'Yesterday';
+
+  const sameYear = d.getFullYear() === today.getFullYear();
+  return d.toLocaleDateString([], {
+    day: 'numeric',
+    month: 'long',
+    year: sameYear ? undefined : 'numeric',
+  });
+}
+
+// Groups a flat, chronologically-sorted message list into { dateLabel, messages[] } buckets
+function groupMessagesByDate(messages) {
+  const groups = [];
+  let currentKey = null;
+  for (const m of messages) {
+    const key = dateKey(m.createdAt);
+    if (key !== currentKey) {
+      groups.push({ dateLabel: formatDateLabel(m.createdAt), messages: [m] });
+      currentKey = key;
+    } else {
+      groups[groups.length - 1].messages.push(m);
+    }
+  }
+  return groups;
+}
+
+const URL_REGEX = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,:;"')\]])/gi;
+
+// Splits message text around URLs, rendering plain text as-is and URLs as
+// clickable links (open in a new tab) with an adjacent copy-link button.
+function linkifyMessage(text, mine, onCopyLink) {
+  if (!text) return null;
+  const regex = new RegExp(URL_REGEX);
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+  let idx = 0;
+
+  while ((match = regex.exec(text)) !== null) {
+    const raw = match[0];
+    const start = match.index;
+    if (start > lastIndex) {
+      parts.push(<span key={`t-${idx}`}>{text.slice(lastIndex, start)}</span>);
+    }
+    const href = raw.startsWith('http') ? raw : `https://${raw}`;
+    parts.push(
+      <span key={`l-${idx}`} className="inline-flex items-center gap-1 align-middle">
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className={`underline break-all ${mine ? 'text-white' : 'text-[var(--brand-primary)]'}`}
+        >
+          {raw}
+        </a>
+        <button
+          type="button"
+          title="Copy link"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCopyLink(href);
+          }}
+          className={`inline-flex shrink-0 ${mine ? 'text-white/80 hover:text-white' : 'text-gray-400 hover:text-gray-700'}`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        </button>
+      </span>
+    );
+    lastIndex = start + raw.length;
+    idx++;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(<span key="t-final">{text.slice(lastIndex)}</span>);
+  }
+  return parts;
 }
 
 export default function ChatPage() {
@@ -48,6 +141,16 @@ export default function ChatPage() {
   const bottomRef = useRef(null);
   const messageInputRef = useRef(null);
   const activeConversationIdRef = useRef('');
+  const fileInputRef = useRef(null);
+
+  const [pendingFiles, setPendingFiles] = useState([]); // [{ file, previewUrl, kind }]
+  const [uploading, setUploading] = useState(false);
+  const [editingMessage, setEditingMessage] = useState(null); // the message object being edited, or null
+  const [replyingTo, setReplyingTo] = useState(null); // the message object being replied to, or null
+  const [lightbox, setLightbox] = useState(null); // { url, kind } or null
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const messageGroups = useMemo(() => groupMessagesByDate(messages), [messages]);
 
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
@@ -206,16 +309,64 @@ export default function ChatPage() {
     });
   };
 
+  const MAX_FILE_MB = 25;
+  const ACCEPTED_TYPES = /^(image|video)\//;
+
+  const handleFilesPicked = (fileList) => {
+    const files = Array.from(fileList || []);
+    const accepted = [];
+    for (const file of files) {
+      if (!ACCEPTED_TYPES.test(file.type)) {
+        toast.error(`${file.name}: only images and videos are supported`);
+        continue;
+      }
+      if (file.size > MAX_FILE_MB * 1024 * 1024) {
+        toast.error(`${file.name}: exceeds ${MAX_FILE_MB}MB limit`);
+        continue;
+      }
+      accepted.push({
+        file,
+        previewUrl: URL.createObjectURL(file),
+        kind: file.type.startsWith('video/') ? 'video' : 'image',
+      });
+    }
+    if (accepted.length) setPendingFiles((prev) => [...prev, ...accepted]);
+  };
+
+  const removePendingFile = (idx) => {
+    setPendingFiles((prev) => {
+      const next = [...prev];
+      const [removed] = next.splice(idx, 1);
+      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      return next;
+    });
+  };
+
   const sendMessage = async () => {
     const body = newMessage.trim();
-    if (!body || !activeConversationId || !canCreate) return;
+    if ((!body && pendingFiles.length === 0) || !activeConversationId || !canCreate) return;
     setSending(true);
+    setUploading(pendingFiles.length > 0);
     try {
       const mentionIds = extractMentionIds(newMessage);
-      const res = await chatAPI.sendMessage(activeConversationId, { body, mentionIds });
+      const replyToId = replyingTo?._id || null;
+      let res;
+      if (pendingFiles.length > 0) {
+        const formData = new FormData();
+        formData.append('body', body || '');
+        mentionIds.forEach((id) => formData.append('mentionIds[]', id));
+        if (replyToId) formData.append('replyToId', replyToId);
+        pendingFiles.forEach((pf) => formData.append('files', pf.file));
+        res = await chatAPI.sendMessage(activeConversationId, formData);
+      } else {
+        res = await chatAPI.sendMessage(activeConversationId, { body, mentionIds, replyToId });
+      }
       setMessages((prev) => [...prev, res.data.message]);
       setNewMessage('');
+      pendingFiles.forEach((pf) => URL.revokeObjectURL(pf.previewUrl));
+      setPendingFiles([]);
       setMentionOpen(false);
+      setReplyingTo(null);
       requestAnimationFrame(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
       });
@@ -224,6 +375,53 @@ export default function ChatPage() {
       toast.error(err.response?.data?.message || 'Failed to send');
     } finally {
       setSending(false);
+      setUploading(false);
+    }
+  };
+
+  const startEdit = (message) => {
+    setEditingMessage(message);
+    setReplyingTo(null);
+    setNewMessage(message.body || '');
+    requestAnimationFrame(() => messageInputRef.current?.focus());
+  };
+
+  const cancelEdit = () => {
+    setEditingMessage(null);
+    setNewMessage('');
+  };
+
+  const submitEdit = async () => {
+    const body = newMessage.trim();
+    if (!body || !editingMessage) return;
+    setSavingEdit(true);
+    try {
+      const mentionIds = extractMentionIds(newMessage);
+      const res = await chatAPI.updateMessage(editingMessage._id, { body, mentionIds });
+      setMessages((prev) => prev.map((m) => (m._id === res.data.message._id ? res.data.message : m)));
+      setEditingMessage(null);
+      setNewMessage('');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to save edit');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const startReply = (message) => {
+    setReplyingTo(message);
+    setEditingMessage(null);
+    requestAnimationFrame(() => messageInputRef.current?.focus());
+  };
+
+  const cancelReply = () => setReplyingTo(null);
+
+  const copyLink = async (url) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Link copied');
+    } catch {
+      toast.error('Could not copy link');
     }
   };
 
@@ -247,8 +445,16 @@ export default function ChatPage() {
       toast.error('Select at least one participant');
       return;
     }
+
+    const isDirect = selectedUserIds.length === 1;
+
+    // Group chats must be named explicitly — no silent "Untitled Group" fallback.
+    if (!isDirect && !newChatTitle.trim()) {
+      toast.error('Please enter a group name');
+      return;
+    }
+
     try {
-      const isDirect = selectedUserIds.length === 1;
       const res = await chatAPI.createConversation({
         title: isDirect ? '' : newChatTitle.trim(),
         participantIds: selectedUserIds,
@@ -305,12 +511,22 @@ export default function ChatPage() {
 
         {showComposer && canCreate && (
           <div className="p-3 border-b border-gray-100 space-y-3 bg-gray-50">
-            <input
-              className="input"
-              placeholder="Group title (optional for direct chat)"
-              value={newChatTitle}
-              onChange={(e) => setNewChatTitle(e.target.value)}
-            />
+            <p className="text-xs text-gray-500">
+              {selectedUserIds.length === 0 && 'Select one person for a direct chat, or multiple for a group.'}
+              {selectedUserIds.length === 1 && 'Direct chat — just you and this person.'}
+              {selectedUserIds.length > 1 && `Group chat with ${selectedUserIds.length} people — give it a name below.`}
+            </p>
+
+            {selectedUserIds.length > 1 && (
+              <input
+                className="input"
+                placeholder="Group name (required)"
+                value={newChatTitle}
+                onChange={(e) => setNewChatTitle(e.target.value)}
+                autoFocus
+              />
+            )}
+
             <div className="max-h-40 overflow-auto space-y-1">
               {people.map((p) => {
                 const checked = selectedUserIds.includes(p._id);
@@ -333,7 +549,9 @@ export default function ChatPage() {
                 );
               })}
             </div>
-            <button className="btn-primary w-full" onClick={createConversation}>Create Conversation</button>
+            <button className="btn-primary w-full" onClick={createConversation}>
+              {selectedUserIds.length > 1 ? 'Create Group' : 'Start Chat'}
+            </button>
           </div>
         )}
 
@@ -406,29 +624,182 @@ export default function ChatPage() {
               {messages.length === 0 && (
                 <p className="text-sm text-gray-400">No messages yet. Start the conversation.</p>
               )}
-              {messages.map((m) => {
-                const mine = m.sender?._id === user?._id;
-                return (
-                  <div key={m._id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[75%] rounded-2xl px-3 py-2 shadow-sm ${mine ? 'bg-[var(--brand-primary)] text-white' : 'bg-white text-gray-800 border border-gray-200'}`}>
-                      <div className={`text-[11px] mb-1 ${mine ? 'text-white/80' : 'text-gray-400'}`}>
-                        {m.sender?.name || 'Unknown'} · {formatTime(m.createdAt)}
-                      </div>
-                      <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>
-                      {!!m.mentions?.length && (
-                        <div className={`mt-1 text-[11px] ${mine ? 'text-white/80' : 'text-indigo-600'}`}>
-                          Mentioned: {m.mentions.map((x) => x.name).join(', ')}
-                        </div>
-                      )}
-                    </div>
+              {messageGroups.map((group) => (
+                <div key={group.dateLabel + group.messages[0]._id}>
+                  <div className="flex justify-center my-3">
+                    <span className="text-[11px] font-medium text-gray-500 bg-gray-100 rounded-full px-3 py-1">
+                      {group.dateLabel}
+                    </span>
                   </div>
-                );
-              })}
+                  <div className="space-y-3">
+                    {group.messages.map((m) => {
+                      const mine = m.sender?._id === user?._id;
+                      const canEditThis = mine || ['super_admin', 'admin'].includes(user?.role);
+                      return (
+                        <div key={m._id} className={`group flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`flex items-end gap-1.5 max-w-[75%] ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
+                            {/* Hover actions */}
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0 mb-1">
+                              <button
+                                type="button"
+                                title="Reply"
+                                onClick={() => startReply(m)}
+                                className="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-gray-700 flex items-center justify-center"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10H5a2 2 0 00-2 2v6a2 2 0 002 2h6M9 10l6-6m-6 6l6 6M9 10h9a2 2 0 012 2v6a2 2 0 01-2 2h-2" />
+                                </svg>
+                              </button>
+                              {canEditThis && !!m.body && (
+                                <button
+                                  type="button"
+                                  title="Edit"
+                                  onClick={() => startEdit(m)}
+                                  className="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-gray-700 flex items-center justify-center"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828z" />
+                                  </svg>
+                                </button>
+                              )}
+                            </div>
+
+                            <div className={`rounded-2xl px-3 py-2 shadow-sm ${mine ? 'bg-[var(--brand-primary)] text-white' : 'bg-white text-gray-800 border border-gray-200'}`}>
+                              <div className={`text-[11px] mb-1 ${mine ? 'text-white/80' : 'text-gray-400'}`}>
+                                {m.sender?.name || 'Unknown'} · {formatTime(m.createdAt)}
+                                {m.editedAt && <span className="italic"> · edited</span>}
+                              </div>
+
+                              {m.replyTo && (
+                                <div className={`mb-1.5 rounded-lg px-2 py-1 border-l-2 text-xs ${mine ? 'border-white/50 bg-white/10 text-white/90' : 'border-[var(--brand-primary)] bg-gray-50 text-gray-600'}`}>
+                                  <div className="font-medium">{m.replyTo.deletedAt ? 'Original message' : (m.replyTo.sender?.name || 'Unknown')}</div>
+                                  <div className="truncate">
+                                    {m.replyTo.deletedAt
+                                      ? 'This message was deleted'
+                                      : (m.replyTo.body || (m.replyTo.attachments?.length ? '📎 Attachment' : ''))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {!!m.attachments?.length && (
+                                <div className="mb-1.5 space-y-1.5">
+                                  {m.attachments.map((att, i) => {
+                                    const isVideo = /\.(mp4|webm|mov|ogg)$/i.test(att.originalname || att.path || '');
+                                    const url = getAssetUrl(att.path);
+                                    return (
+                                      <div key={i} className="rounded-lg overflow-hidden border border-black/10">
+                                        {isVideo ? (
+                                          <video
+                                            src={url}
+                                            controls
+                                            className="max-w-full max-h-64 cursor-pointer"
+                                            onClick={() => setLightbox({ url, kind: 'video' })}
+                                          />
+                                        ) : (
+                                          <img
+                                            src={url}
+                                            alt={att.originalname || 'attachment'}
+                                            className="max-w-full max-h-64 object-cover cursor-pointer"
+                                            onClick={() => setLightbox({ url, kind: 'image' })}
+                                          />
+                                        )}
+                                        <a
+                                          href={url}
+                                          download={att.originalname}
+                                          onClick={(e) => e.stopPropagation()}
+                                          className={`flex items-center justify-center gap-1 text-[11px] py-1 ${mine ? 'text-white/90 bg-white/10' : 'text-gray-600 bg-gray-50'}`}
+                                        >
+                                          Download
+                                        </a>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {!!m.body && (
+                                <p className="text-sm whitespace-pre-wrap break-words">
+                                  {linkifyMessage(m.body, mine, copyLink)}
+                                </p>
+                              )}
+                              {!!m.mentions?.length && (
+                                <div className={`mt-1 text-[11px] ${mine ? 'text-white/80' : 'text-indigo-600'}`}>
+                                  Mentioned: {m.mentions.map((x) => x.name).join(', ')}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
               <div ref={bottomRef} />
             </div>
 
-            <footer className="p-3 border-t border-gray-100 flex items-center gap-2">
-              <div className="relative flex-1">
+            <footer className="p-3 border-t border-gray-100 flex flex-col gap-2">
+              {editingMessage && (
+                <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 text-xs text-amber-800">
+                  <span>Editing your message</span>
+                  <button type="button" onClick={cancelEdit} className="text-amber-600 hover:text-amber-900">Cancel</button>
+                </div>
+              )}
+              {replyingTo && !editingMessage && (
+                <div className="flex items-center justify-between gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs">
+                  <div className="min-w-0">
+                    <div className="font-medium text-gray-700">Replying to {replyingTo.sender?.name || 'Unknown'}</div>
+                    <div className="text-gray-500 truncate">{replyingTo.body || (replyingTo.attachments?.length ? '📎 Attachment' : '')}</div>
+                  </div>
+                  <button type="button" onClick={cancelReply} className="text-gray-400 hover:text-gray-700 shrink-0">×</button>
+                </div>
+              )}
+              {pendingFiles.length > 0 && (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {pendingFiles.map((pf, idx) => (
+                    <div key={idx} className="relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                      {pf.kind === 'video' ? (
+                        <video src={pf.previewUrl} className="w-full h-full object-cover" />
+                      ) : (
+                        <img src={pf.previewUrl} alt={pf.file.name} className="w-full h-full object-cover" />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removePendingFile(idx)}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                {canCreate && (
+                  <>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*,video/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        handleFilesPicked(e.target.files);
+                        e.target.value = '';
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="shrink-0 w-9 h-9 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex items-center justify-center"
+                      title="Attach image or video"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 10-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                    </button>
+                  </>
+                )}
+                <div className="relative flex-1">
               <input
                 ref={messageInputRef}
                 className="input"
@@ -467,7 +838,10 @@ export default function ChatPage() {
                   }
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    sendMessage();
+                    editingMessage ? submitEdit() : sendMessage();
+                  }
+                  if (e.key === 'Escape' && editingMessage) {
+                    cancelEdit();
                   }
                 }}
               />
@@ -486,10 +860,21 @@ export default function ChatPage() {
                   ))}
                 </div>
               )}
+                </div>
+                <button
+                  className="btn-primary"
+                  disabled={
+                    editingMessage
+                      ? savingEdit || !newMessage.trim()
+                      : !canCreate || sending || (!newMessage.trim() && pendingFiles.length === 0)
+                  }
+                  onClick={editingMessage ? submitEdit : sendMessage}
+                >
+                  {editingMessage
+                    ? (savingEdit ? 'Saving...' : 'Save')
+                    : (uploading ? 'Uploading...' : sending ? 'Sending...' : 'Send')}
+                </button>
               </div>
-              <button className="btn-primary" disabled={!canCreate || sending || !newMessage.trim()} onClick={sendMessage}>
-                {sending ? 'Sending...' : 'Send'}
-              </button>
             </footer>
           </>
         )}
@@ -524,6 +909,39 @@ export default function ChatPage() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          {lightbox.kind === 'video' ? (
+            <video
+              src={lightbox.url}
+              controls
+              autoPlay
+              className="max-w-[92vw] max-h-[88vh] rounded-lg"
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <img
+              src={lightbox.url}
+              alt="attachment"
+              className="max-w-[92vw] max-h-[88vh] object-contain rounded-lg"
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
         </div>
       )}
     </div>
