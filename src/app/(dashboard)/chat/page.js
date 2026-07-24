@@ -171,6 +171,35 @@ export default function ChatPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
 
+  // --- Per-message "..." action menu ---
+  const [openActionMenuId, setOpenActionMenuId] = useState('');
+  const [actionMenuOpensUp, setActionMenuOpensUp] = useState(false);
+  const actionMenuRefs = useRef({});
+
+  // Toggles a message's "..." menu, measuring available space below the
+  // button so the menu flips upward instead of getting clipped when the
+  // message sits near the bottom of the scroll container/viewport.
+  const toggleActionMenu = (id, e) => {
+    if (openActionMenuId === id) {
+      setOpenActionMenuId('');
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const MENU_HEIGHT_ESTIMATE = 190; // ~4 rows including padding
+    setActionMenuOpensUp(window.innerHeight - rect.bottom < MENU_HEIGHT_ESTIMATE);
+    setOpenActionMenuId(id);
+  };
+
+  // --- Forward message ---
+  const [forwardingMessage, setForwardingMessage] = useState(null); // the message object being forwarded, or null
+  const [forwardTargetIds, setForwardTargetIds] = useState([]);
+  const [forwardSearch, setForwardSearch] = useState('');
+  const [forwardNewChatMode, setForwardNewChatMode] = useState(false);
+  const [forwardNewChatTitle, setForwardNewChatTitle] = useState('');
+  const [forwardNewChatUserIds, setForwardNewChatUserIds] = useState([]);
+  const [forwardMentionUserIds, setForwardMentionUserIds] = useState([]);
+  const [forwarding, setForwarding] = useState(false);
+
   const messageGroups = useMemo(() => groupMessagesByDate(messages), [messages]);
 
   useEffect(() => {
@@ -182,6 +211,26 @@ export default function ChatPage() {
     [conversations, activeConversationId]
   );
 
+  // Remembers the other participant's name for each direct (1:1) chat, for
+  // the lifetime of the session. If that person later leaves the
+  // conversation, the backend drops them from `participants`, and without
+  // this cache the UI would fall back to a generic "Direct Chat" label —
+  // this keeps their name visible even after they've left.
+  const directChatNameCache = useRef({});
+
+  const isOtherParticipantPresent = (c) => {
+    if (!c || c.type === 'group') return true;
+    return (c.participants || []).some((p) => p._id !== user?._id);
+  };
+
+  const getConversationTitle = (c) => {
+    if (!c) return '';
+    if (c.type === 'group') return c.title || 'Untitled Group';
+    const other = (c.participants || []).find((p) => p._id !== user?._id);
+    if (other?.name) return other.name;
+    return directChatNameCache.current[c._id] || 'Direct Chat';
+  };
+
   const filteredConversations = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return conversations;
@@ -192,12 +241,56 @@ export default function ChatPage() {
     });
   }, [conversations, search]);
 
+  // Conversation list shown inside the Forward modal, filtered by its own search box.
+  const forwardableConversations = useMemo(() => {
+    const q = forwardSearch.trim().toLowerCase();
+    return conversations.filter((c) => {
+      if (!q) return true;
+      const title = (c.title || '').toLowerCase();
+      const names = (c.participants || []).map((p) => (p.name || '').toLowerCase()).join(' ');
+      return title.includes(q) || names.includes(q);
+    });
+  }, [conversations, forwardSearch]);
+
+  // People eligible to be @mentioned in the forward — the union of members
+  // across every currently selected target (existing chats + the new-chat
+  // picker), so tagging always matches who will actually receive the message.
+  const forwardMentionCandidates = useMemo(() => {
+    const map = new Map();
+    forwardTargetIds.forEach((id) => {
+      const conv = conversations.find((c) => c._id === id);
+      (conv?.participants || []).forEach((p) => {
+        if (p && p._id !== user?._id) map.set(p._id, p);
+      });
+    });
+    if (forwardNewChatMode) {
+      forwardNewChatUserIds.forEach((id) => {
+        const p = people.find((pp) => pp._id === id);
+        if (p) map.set(p._id, p);
+      });
+    }
+    return Array.from(map.values());
+  }, [forwardTargetIds, forwardNewChatMode, forwardNewChatUserIds, conversations, people, user?._id]);
+
+  // Drop any tagged user who's no longer eligible once the selected targets change.
+  useEffect(() => {
+    const validIds = new Set(forwardMentionCandidates.map((p) => p._id));
+    setForwardMentionUserIds((prev) => prev.filter((id) => validIds.has(id)));
+  }, [forwardMentionCandidates]);
+
   const refreshConversations = async () => {
     const res = await chatAPI.getConversations();
     const list = [...(res.data.conversations || [])].sort((a, b) => {
       const aTime = new Date(a.lastMessageAt || a.updatedAt || a.createdAt).getTime();
       const bTime = new Date(b.lastMessageAt || b.updatedAt || b.createdAt).getTime();
       return bTime - aTime; // newest activity first
+    });
+    // Snapshot the other participant's name for every direct chat we can
+    // still see them in, so it's available later if they leave.
+    list.forEach((c) => {
+      if (c.type === 'group') return;
+      const other = (c.participants || []).find((p) => p._id !== user?._id);
+      if (other?.name) directChatNameCache.current[c._id] = other.name;
     });
     setConversations(list);
     setActiveConversationId((prev) => {
@@ -273,6 +366,19 @@ export default function ChatPage() {
     return () => cleanups.forEach((fn) => fn());
   }, [messages]);
 
+  // Closes the open "..." action menu when clicking anywhere outside of it.
+  useEffect(() => {
+    if (!openActionMenuId) return;
+    const handleClickOutside = (e) => {
+      const node = actionMenuRefs.current[openActionMenuId];
+      if (node && !node.contains(e.target)) {
+        setOpenActionMenuId('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openActionMenuId]);
+
   const loadMessages = async (conversationId, { forceScroll = false } = {}) => {
     if (!conversationId) return;
     const res = await chatAPI.getMessages(conversationId, { limit: 100 });
@@ -285,6 +391,15 @@ export default function ChatPage() {
     const newMessages = [...(res.data.messages || [])].sort(
       (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
     );
+    // Fall back to any message's embedded sender name to recover a departed
+    // participant's display name — this covers opening the conversation for
+    // the very first time in a session AFTER they've already left, when the
+    // live `participants` list never included them and refreshConversations'
+    // cache pass had nothing to snapshot.
+    const otherMsgSender = [...newMessages].reverse().find((m) => m.sender && m.sender._id !== user?._id)?.sender;
+    if (otherMsgSender?.name) {
+      directChatNameCache.current[conversationId] = otherMsgSender.name;
+    }
     const added = newMessages.length - prevMessageCountRef.current;
     setMessages(newMessages);
     prevMessageCountRef.current = newMessages.length;
@@ -667,6 +782,130 @@ export default function ChatPage() {
     }
   };
 
+  // --- Forward message helpers ---
+
+  const openForward = (message) => {
+    setForwardingMessage(message);
+    setForwardTargetIds([]);
+    setForwardSearch('');
+    setForwardNewChatMode(false);
+    setForwardNewChatTitle('');
+    setForwardNewChatUserIds([]);
+    setForwardMentionUserIds([]);
+  };
+
+  const closeForward = () => {
+    if (forwarding) return;
+    setForwardingMessage(null);
+  };
+
+  const toggleForwardTarget = (id) => {
+    setForwardTargetIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleForwardNewChatUser = (id) => {
+    setForwardNewChatUserIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleForwardMentionUser = (id) => {
+    setForwardMentionUserIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const mentionHandleFor = (name) => String(name || '').trim().toLowerCase().replace(/\s+/g, '.');
+
+  const submitForward = async () => {
+    if (!forwardingMessage) return;
+    const targets = [...forwardTargetIds];
+
+    if (forwardNewChatMode && forwardNewChatUserIds.length === 0 && targets.length === 0) {
+      toast.error('Select at least one existing chat, or pick people for a new chat');
+      return;
+    }
+    if (!forwardNewChatMode && targets.length === 0) {
+      toast.error('Select at least one conversation to forward to');
+      return;
+    }
+
+    setForwarding(true);
+    try {
+      // Create a new conversation first (if requested) and fold it into the target list.
+      if (forwardNewChatMode && forwardNewChatUserIds.length > 0) {
+        const isDirect = forwardNewChatUserIds.length === 1;
+        if (!isDirect && !forwardNewChatTitle.trim()) {
+          toast.error('Please enter a group name for the new chat');
+          setForwarding(false);
+          return;
+        }
+        const res = await chatAPI.createConversation({
+          title: isDirect ? '' : forwardNewChatTitle.trim(),
+          participantIds: forwardNewChatUserIds,
+          type: isDirect ? 'direct' : 'group',
+        });
+        targets.push(res.data.conversation._id);
+      }
+
+      if (targets.length === 0) {
+        toast.error('Select at least one conversation to forward to');
+        setForwarding(false);
+        return;
+      }
+
+      // Re-download any attachments on the original message so they can be
+      // re-uploaded as fresh files on each forwarded copy.
+      let files = [];
+      if (forwardingMessage.attachments?.length) {
+        files = await Promise.all(
+          forwardingMessage.attachments.map(async (att) => {
+            const url = getAssetUrl(att.path);
+            const resp = await fetch(url);
+            const blob = await resp.blob();
+            return new File([blob], att.originalname || 'file', { type: blob.type || 'application/octet-stream' });
+          })
+        );
+      }
+
+      await Promise.all(
+        targets.map(async (convId) => {
+          // Only tag people who are actually members of this particular
+          // target — matters when forwarding to several chats at once with
+          // different rosters, and for the just-created conversation (which
+          // isn't in `conversations` state yet) we fall back to the
+          // new-chat picker's selection.
+          const conv = conversations.find((c) => c._id === convId);
+          const validMentionIds = forwardMentionUserIds.filter((id) =>
+            conv ? (conv.participants || []).some((p) => p._id === id) : forwardNewChatUserIds.includes(id)
+          );
+          const mentionUsers = forwardMentionCandidates.filter((p) => validMentionIds.includes(p._id));
+          const mentionPrefix = mentionUsers.map((p) => `@${mentionHandleFor(p.name)}`).join(' ');
+          const body = mentionPrefix
+            ? `${mentionPrefix} ${forwardingMessage.body || ''}`.trim()
+            : (forwardingMessage.body || '');
+
+          if (files.length > 0) {
+            const formData = new FormData();
+            formData.append('body', body);
+            validMentionIds.forEach((id) => formData.append('mentionIds[]', id));
+            files.forEach((f) => formData.append('files', f));
+            await chatAPI.sendMessage(convId, formData);
+          } else {
+            await chatAPI.sendMessage(convId, { body, mentionIds: validMentionIds });
+          }
+        })
+      );
+
+      toast.success(`Forwarded to ${targets.length} conversation${targets.length > 1 ? 's' : ''}`);
+      closeForward();
+      await refreshConversations();
+      if (activeConversationIdRef.current && targets.includes(activeConversationIdRef.current)) {
+        await loadMessages(activeConversationIdRef.current);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to forward message');
+    } finally {
+      setForwarding(false);
+    }
+  };
+
   const leaveActiveConversation = async () => {
     if (!activeConversationId) return;
     if (!confirm('Leave this chat conversation?')) return;
@@ -803,8 +1042,10 @@ export default function ChatPage() {
           )}
           {filteredConversations.map((c) => {
             const active = c._id === activeConversationId;
+            const isGroup = c.type === 'group';
             const others = (c.participants || []).filter((p) => p._id !== user?._id);
-            const title = c.type === 'group' ? (c.title || 'Untitled Group') : (others[0]?.name || 'Direct Chat');
+            const title = getConversationTitle(c);
+            const otherLeft = !isGroup && others.length === 0;
             return (
               <button
                 key={c._id}
@@ -812,13 +1053,20 @@ export default function ChatPage() {
                 onClick={() => setActiveConversationId(c._id)}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="font-medium text-sm text-gray-900 truncate">{title}</div>
-                  <span className="text-[11px] text-gray-400">{formatTime(c.lastMessageAt || c.updatedAt)}</span>
+                  <div className="font-medium text-sm text-gray-900 truncate flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{title}</span>
+                    {otherLeft && <span className="text-[10px] font-normal text-gray-400 shrink-0">(left)</span>}
+                  </div>
+                  <span className="text-[11px] text-gray-400 shrink-0">{formatTime(c.lastMessageAt || c.updatedAt)}</span>
                 </div>
-                <div className="text-xs text-gray-500 truncate mt-0.5">
-                  {others.map((p) => p.name).join(', ') || 'Only you'}
-                </div>
-                <div className="text-[11px] text-gray-400 mt-1">{(c.participants || []).length} member(s)</div>
+                {isGroup && (
+                  <>
+                    <div className="text-xs text-gray-500 truncate mt-0.5">
+                      {others.map((p) => p.name).join(', ') || 'Only you'}
+                    </div>
+                    <div className="text-[11px] text-gray-400 mt-1">{(c.participants || []).length} member(s)</div>
+                  </>
+                )}
               </button>
             );
           })}
@@ -832,16 +1080,16 @@ export default function ChatPage() {
           <>
             <header className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
               <div className="w-9 h-9 rounded-full bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-bold">
-                {initials(activeConversation.type === 'group' ? activeConversation.title : activeConversation.participants?.find((p) => p._id !== user?._id)?.name || 'C')}
+                {initials(getConversationTitle(activeConversation))}
               </div>
               <div className="flex-1">
                 <h2 className="text-sm font-semibold text-gray-900">
-                  {activeConversation.type === 'group'
-                    ? (activeConversation.title || 'Untitled Group')
-                    : (activeConversation.participants?.find((p) => p._id !== user?._id)?.name || 'Direct Chat')}
+                  {getConversationTitle(activeConversation)}
                 </h2>
                 <p className="text-xs text-gray-400">
-                  {(activeConversation.participants || []).length} member(s)
+                  {activeConversation.type === 'group'
+                    ? `${(activeConversation.participants || []).length} member(s)`
+                    : (isOtherParticipantPresent(activeConversation) ? 'Direct message' : 'This person has left the conversation')}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -871,6 +1119,7 @@ export default function ChatPage() {
                 // Small threshold so "basically at the bottom" still counts,
                 // without requiring pixel-perfect scroll position.
                 setNearBottom(distanceFromBottom < 120);
+                if (openActionMenuId) setOpenActionMenuId('');
               }}
               className="h-full overflow-y-auto p-4 bg-gradient-to-b from-white to-slate-50">
               <div ref={contentRef} className="space-y-3">
@@ -889,44 +1138,98 @@ export default function ChatPage() {
                       const mine = m.sender?._id === user?._id;
                       const canEditThis = mine || ['super_admin', 'admin'].includes(user?.role);
                       const canDeleteThis = mine || ['super_admin', 'admin', 'manager', 'team_lead'].includes(user?.role);
+                      const menuOpen = openActionMenuId === m._id;
                       return (
                         <div key={m._id} className={`group flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`flex items-end gap-1.5 max-w-[75%] ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
-                            {/* Hover actions */}
-                            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0 mb-1">
+                          <div className={`flex items-start gap-1.5 max-w-[75%] ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
+                            {/* "..." actions menu */}
+                            <div
+                              className="relative shrink-0 mb-1"
+                              ref={(el) => {
+                                actionMenuRefs.current[m._id] = el;
+                              }}
+                            >
                               <button
                                 type="button"
-                                title="Reply"
-                                onClick={() => startReply(m)}
-                                className="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-gray-700 flex items-center justify-center"
+                                title="More actions"
+                                onClick={(e) => toggleActionMenu(m._id, e)}
+                                className={`w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-gray-700 flex items-center justify-center transition-opacity ${
+                                  menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                }`}
                               >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10H5a2 2 0 00-2 2v6a2 2 0 002 2h6M9 10l6-6m-6 6l6 6M9 10h9a2 2 0 012 2v6a2 2 0 01-2 2h-2" />
+                                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                                  <circle cx="5" cy="12" r="2" />
+                                  <circle cx="12" cy="12" r="2" />
+                                  <circle cx="19" cy="12" r="2" />
                                 </svg>
                               </button>
-                              {canEditThis && !!m.body && (
-                                <button
-                                  type="button"
-                                  title="Edit"
-                                  onClick={() => startEdit(m)}
-                                  className="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-gray-700 flex items-center justify-center"
+
+                              {menuOpen && (
+                                <div
+                                  className={`absolute z-30 ${actionMenuOpensUp ? 'bottom-7' : 'top-7'} ${mine ? 'right-0' : 'left-0'} w-40 bg-white border border-gray-200 rounded-xl shadow-lg py-1`}
                                 >
-                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828z" />
-                                  </svg>
-                                </button>
-                              )}
-                              {canDeleteThis && (
-                                <button
-                                  type="button"
-                                  title="Delete"
-                                  onClick={() => deleteMessage(m)}
-                                  className="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-200 flex items-center justify-center"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      startReply(m);
+                                      setOpenActionMenuId('');
+                                    }}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                                  >
+                                    <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10H5a2 2 0 00-2 2v6a2 2 0 002 2h6M9 10l6-6m-6 6l6 6M9 10h9a2 2 0 012 2v6a2 2 0 01-2 2h-2" />
+                                    </svg>
+                                    Reply
+                                  </button>
+
+                                  {canCreate && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        openForward(m);
+                                        setOpenActionMenuId('');
+                                      }}
+                                      className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                                    >
+                                      <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                      </svg>
+                                      Forward
+                                    </button>
+                                  )}
+
+                                  {canEditThis && !!m.body && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        startEdit(m);
+                                        setOpenActionMenuId('');
+                                      }}
+                                      className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                                    >
+                                      <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828z" />
+                                      </svg>
+                                      Edit
+                                    </button>
+                                  )}
+
+                                  {canDeleteThis && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenActionMenuId('');
+                                        deleteMessage(m);
+                                      }}
+                                      className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                    >
+                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                      </svg>
+                                      Delete
+                                    </button>
+                                  )}
+                                </div>
                               )}
                             </div>
 
@@ -1078,6 +1381,13 @@ export default function ChatPage() {
             )}
             </div>
 
+            {activeConversation.type !== 'group' && !isOtherParticipantPresent(activeConversation) ? (
+              <footer className="p-4 border-t border-gray-100 text-center">
+                <p className="text-sm text-gray-400">
+                  <span className="font-medium text-gray-500">{getConversationTitle(activeConversation)}</span> has left this conversation — you can no longer send messages here.
+                </p>
+              </footer>
+            ) : (
             <footer
               className="relative p-3 border-t border-gray-100 flex flex-col gap-2"
               onDragEnter={handleDragEnter}
@@ -1176,6 +1486,15 @@ export default function ChatPage() {
                 onClick={(e) => {
                   refreshMentionState(newMessage, e.currentTarget.selectionStart ?? newMessage.length);
                 }}
+                onPaste={(e) => {
+                  if (!canCreate) return;
+                  const items = Array.from(e.clipboardData?.items || []);
+                  const fileItems = items.filter((it) => it.kind === 'file');
+                  if (fileItems.length === 0) return; // plain text paste — let the default behavior handle it
+                  e.preventDefault();
+                  const files = fileItems.map((it) => it.getAsFile()).filter(Boolean);
+                  if (files.length) handleFilesPicked(files);
+                }}
                 onKeyDown={(e) => {
                   if (mentionOpen && mentionCandidates.length > 0) {
                     if (e.key === 'ArrowDown') {
@@ -1239,6 +1558,7 @@ export default function ChatPage() {
                 </button>
               </div>
             </footer>
+            )}
           </>
         )}
       </section>
@@ -1270,6 +1590,142 @@ export default function ChatPage() {
                   <span className="text-[11px] px-2 py-1 rounded-full bg-gray-100 text-gray-600 capitalize">{member.role?.replace('_', ' ')}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {forwardingMessage && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">Forward Message</h3>
+                <p className="text-xs text-gray-400 truncate max-w-[280px]">
+                  {forwardingMessage.body || (forwardingMessage.attachments?.length ? '📎 Attachment' : '')}
+                </p>
+              </div>
+              <button type="button" className="text-gray-400 hover:text-gray-700" onClick={closeForward}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex border-b border-gray-100 shrink-0">
+              <button
+                type="button"
+                onClick={() => setForwardNewChatMode(false)}
+                className={`flex-1 text-xs font-medium py-2.5 ${!forwardNewChatMode ? 'text-[var(--brand-primary)] border-b-2 border-[var(--brand-primary)]' : 'text-gray-400 hover:text-gray-600'}`}
+              >
+                Existing Chats
+              </button>
+              <button
+                type="button"
+                onClick={() => setForwardNewChatMode(true)}
+                className={`flex-1 text-xs font-medium py-2.5 ${forwardNewChatMode ? 'text-[var(--brand-primary)] border-b-2 border-[var(--brand-primary)]' : 'text-gray-400 hover:text-gray-600'}`}
+              >
+                New Chat
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3">
+              {!forwardNewChatMode ? (
+                <>
+                  <input
+                    className="input mb-2"
+                    placeholder="Search conversations..."
+                    value={forwardSearch}
+                    onChange={(e) => setForwardSearch(e.target.value)}
+                  />
+                  <div className="space-y-1">
+                    {forwardableConversations.length === 0 && (
+                      <p className="text-sm text-gray-400 p-2">No conversations found</p>
+                    )}
+                    {forwardableConversations.map((c) => {
+                      const title = getConversationTitle(c);
+                      const checked = forwardTargetIds.includes(c._id);
+                      return (
+                        <label
+                          key={c._id}
+                          className={`flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer ${checked ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
+                        >
+                          <input type="checkbox" checked={checked} onChange={() => toggleForwardTarget(c._id)} />
+                          <div className="w-7 h-7 rounded-full bg-[var(--brand-primary)] text-white flex items-center justify-center text-[10px] font-semibold shrink-0">
+                            {initials(title)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-gray-900 truncate">{title}</div>
+                            <div className="text-[11px] text-gray-400 truncate">
+                              {c.type === 'group' ? `${(c.participants || []).length} member(s)` : 'Direct chat'}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">
+                    {forwardNewChatUserIds.length === 0 && 'Select one person for a direct chat, or multiple for a group.'}
+                    {forwardNewChatUserIds.length === 1 && 'Direct chat — just you and this person.'}
+                    {forwardNewChatUserIds.length > 1 && `Group chat with ${forwardNewChatUserIds.length} people — give it a name below.`}
+                  </p>
+                  {forwardNewChatUserIds.length > 1 && (
+                    <input
+                      className="input"
+                      placeholder="Group name (required)"
+                      value={forwardNewChatTitle}
+                      onChange={(e) => setForwardNewChatTitle(e.target.value)}
+                      autoFocus
+                    />
+                  )}
+                  <div className="space-y-1">
+                    {people.map((p) => {
+                      const checked = forwardNewChatUserIds.includes(p._id);
+                      return (
+                        <label key={p._id} className="flex items-center gap-2 text-sm text-gray-700 px-2 py-1.5 rounded hover:bg-gray-50">
+                          <input type="checkbox" checked={checked} onChange={() => toggleForwardNewChatUser(p._id)} />
+                          <span>{p.name}</span>
+                          <span className="text-xs text-gray-400">{p.role}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {forwardMentionCandidates.length > 0 && (
+              <div className="px-3 pt-2.5 pb-1 border-t border-gray-100 shrink-0">
+                <p className="text-xs font-medium text-gray-600 mb-1.5">Tag someone (optional)</p>
+                <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+                  {forwardMentionCandidates.map((p) => {
+                    const checked = forwardMentionUserIds.includes(p._id);
+                    return (
+                      <button
+                        key={p._id}
+                        type="button"
+                        onClick={() => toggleForwardMentionUser(p._id)}
+                        className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                          checked
+                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                            : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        @{p.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="p-3 border-t border-gray-100 shrink-0">
+              <button className="btn-primary w-full" disabled={forwarding} onClick={submitForward}>
+                {forwarding ? 'Forwarding...' : 'Forward'}
+              </button>
             </div>
           </div>
         </div>

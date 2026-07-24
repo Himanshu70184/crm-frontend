@@ -68,18 +68,11 @@ function formatTime(date) {
   return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// Converts a minute count into the same "X.Xh" hour format already used
-// for worked hours, so late time reads consistently instead of a raw
-// minute count (e.g. 237 -> "4.0h" instead of "237 min").
 function formatMinutesAsHours(minutes) {
   const value = Number(minutes) || 0;
   return `${(value / 60).toFixed(1)}h`;
 }
 
-// Precise "Xh Ym Zs" breakdown of a worked-duration value expressed in
-// minutes (which may carry a fractional part representing seconds, e.g.
-// 144.5 minutes = 2h 24m 30s). Used anywhere a single session/day's
-// worked time is shown, so it reads exactly rather than a rounded decimal.
 function formatWorkedDuration(minutesValue) {
   const totalMinutes = Number(minutesValue) || 0;
   const totalSeconds = Math.round(totalMinutes * 60);
@@ -93,20 +86,6 @@ function formatWorkedDuration(minutesValue) {
   return parts.join(' ');
 }
 
-// Captures a single frame from a screen share as a base64 JPEG.
-//
-// IMPORTANT BROWSER LIMITATION:
-// getDisplayMedia() ALWAYS shows the browser's native picker dialog
-// ("This Tab" / "Window" / "Entire Screen"). There is no way for a web
-// page to silently grab the full desktop (with taskbar) — the user must
-// explicitly choose "Entire Screen" in that dialog every time. This is
-// enforced by the browser itself for security and cannot be bypassed
-// from JS, even with preferCurrentTab or displaySurface hints — those
-// only set which tab is PRE-SELECTED, not force silent capture.
-//
-// Below, we hint 'monitor' as the preferred/default surface so the
-// picker opens with "Entire Screen" pre-selected, making it a single
-// click for the user to include the taskbar/search bar.
 async function captureFullScreenshot() {
   if (!navigator.mediaDevices?.getDisplayMedia) {
     throw new Error('Screen capture is not supported in this browser');
@@ -114,10 +93,8 @@ async function captureFullScreenshot() {
 
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: {
-      displaySurface: 'monitor', // hint: prefer "Entire Screen" option
+      displaySurface: 'monitor',
     },
-    // NOTE: no preferCurrentTab / no displaySurface:'browser' — those
-    // were restricting the picker to tab-only capture.
     audio: false,
   });
 
@@ -125,7 +102,6 @@ async function captureFullScreenshot() {
     const track = stream.getVideoTracks()[0];
     const settings = track.getSettings();
 
-    // Let the user know if they picked something other than full screen
     if (settings.displaySurface && settings.displaySurface !== 'monitor') {
       toast('Tip: choose "Entire Screen" next time to include the taskbar', {
         icon: 'ℹ️',
@@ -148,11 +124,6 @@ async function captureFullScreenshot() {
     const rawWidth = bitmap.width || bitmap.videoWidth;
     const rawHeight = bitmap.height || bitmap.videoHeight;
 
-    // Full-monitor captures (especially on 1440p/4K screens) produce much
-    // larger base64 strings than the old tab-only capture. The backend's
-    // sanitizeScreenshot() rejects (silently, as null) anything over
-    // ~4MB of base64, so we downscale here to keep things comfortably
-    // under that cap while still being clearly legible.
     const MAX_DIMENSION = 1600;
     const scale = Math.min(1, MAX_DIMENSION / Math.max(rawWidth, rawHeight));
 
@@ -162,10 +133,7 @@ async function captureFullScreenshot() {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
 
-    // Step quality down until the encoded string fits comfortably under
-    // the backend cap (~4MB base64 chars), rather than gambling on one
-    // fixed quality value.
-    const MAX_BASE64_LENGTH = 3.5 * 1024 * 1024; // leave headroom under the 4MB backend cap
+    const MAX_BASE64_LENGTH = 3.5 * 1024 * 1024;
     let quality = 0.75;
     let dataUrl = canvas.toDataURL('image/jpeg', quality);
 
@@ -205,7 +173,6 @@ export default function AttendancePage() {
       setRecords(attendanceRes.data.records || []);
       setSummary(attendanceRes.data.summary || null);
       setSelfTodayRecord(selfTodayRes.data.record || null);
-      // Clients don't clock in/out, so exclude them from the filter dropdown.
       setUsers(
         (usersRes.data.users || []).filter(
           (item) => item.isActive !== false && item.role !== 'client'
@@ -222,9 +189,6 @@ export default function AttendancePage() {
     fetchData();
   }, [filters.user, filters.startDate, filters.endDate]);
 
-  // When a preset (other than Custom) is chosen, compute its date range
-  // and apply it immediately. Custom leaves the existing dates as-is and
-  // just reveals the manual pickers below.
   const handlePresetChange = (value) => {
     setDatePreset(value);
     const compute = DATE_PRESETS[value];
@@ -257,18 +221,24 @@ export default function AttendancePage() {
   const handleClock = async (type) => {
     setSaving(true);
     try {
-      let screenshot = null;
+      // A screenshot is REQUIRED by the backend (AttendanceRecord schema
+      // marks clockInScreenshot/clockOutScreenshot as required). If screen
+      // capture fails or permission is denied, we must NOT call the
+      // clock-in/out API at all — sending the request without a screenshot
+      // only fails later with a confusing Mongoose validation error.
+      // Instead, stop here with a clear, actionable message.
+      let screenshot;
       try {
         screenshot = await captureFullScreenshot();
       } catch (captureErr) {
-        toast.error('Screenshot permission denied or unavailable — continuing without it');
+        toast.error(`Please allow screen sharing to clock ${type}`, {
+          style: { maxWidth: 460, whiteSpace: 'nowrap' },
+        });
+        return;
       }
 
       const api = type === 'in' ? attendanceAPI.clockIn : attendanceAPI.clockOut;
-      // screenshot (base64 data URL) is sent to the backend, which is
-      // responsible for decoding it and writing it into a folder on disk
-      // — see the backend snippet provided alongside this file.
-      await api(screenshot ? { screenshot } : {});
+      await api({ screenshot });
       toast.success(type === 'in' ? 'Clock in recorded' : 'Clock out recorded');
       await fetchData();
     } catch (error) {
