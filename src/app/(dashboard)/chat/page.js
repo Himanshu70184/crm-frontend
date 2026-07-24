@@ -59,6 +59,13 @@ function groupMessagesByDate(messages) {
   return groups;
 }
 
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 const URL_REGEX = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,:;"')\]])/gi;
 
 // Splits message text around URLs, rendering plain text as-is and URLs as
@@ -139,16 +146,30 @@ export default function ChatPage() {
   const [mentionIndex, setMentionIndex] = useState(0);
 
   const bottomRef = useRef(null);
+  const messagesContainerRef = useRef(null);
+  const contentRef = useRef(null);
+  // Mirrors `atBottom` state into a ref so async code (the 8s polling loop,
+  // load callbacks) can read the latest value without stale closures, while
+  // `atBottom` itself drives the floating "jump to bottom" button's visibility.
+  const isNearBottomRef = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
+  // Tracks how many messages we last rendered, so when a poll or reply comes
+  // back we can tell how many are new instead of guessing from array length.
+  const prevMessageCountRef = useRef(0);
   const messageInputRef = useRef(null);
   const activeConversationIdRef = useRef('');
   const fileInputRef = useRef(null);
 
   const [pendingFiles, setPendingFiles] = useState([]); // [{ file, previewUrl, kind }]
   const [uploading, setUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounter = useRef(0);
   const [editingMessage, setEditingMessage] = useState(null); // the message object being edited, or null
   const [replyingTo, setReplyingTo] = useState(null); // the message object being replied to, or null
   const [lightbox, setLightbox] = useState(null); // { url, kind } or null
   const [savingEdit, setSavingEdit] = useState(false);
+  const [highlightedMessageId, setHighlightedMessageId] = useState('');
 
   const messageGroups = useMemo(() => groupMessagesByDate(messages), [messages]);
 
@@ -173,21 +194,116 @@ export default function ChatPage() {
 
   const refreshConversations = async () => {
     const res = await chatAPI.getConversations();
-    const list = res.data.conversations || [];
+    const list = [...(res.data.conversations || [])].sort((a, b) => {
+      const aTime = new Date(a.lastMessageAt || a.updatedAt || a.createdAt).getTime();
+      const bTime = new Date(b.lastMessageAt || b.updatedAt || b.createdAt).getTime();
+      return bTime - aTime; // newest activity first
+    });
     setConversations(list);
     setActiveConversationId((prev) => {
       if (prev && list.some((c) => c._id === prev)) return prev;
+      // list[0] is now guaranteed to be the most recently active
+      // conversation, not just whatever the backend happened to return first.
       return list.length > 0 ? list[0]._id : '';
     });
   };
 
-  const loadMessages = async (conversationId) => {
+  // Central place to update "am I at the bottom" — keeps the ref (for async
+  // reads) and the state (for rendering the button) in sync, and clears the
+  // unread badge the moment the user arrives back at the bottom.
+  const setNearBottom = (val) => {
+    isNearBottomRef.current = val;
+    setAtBottom(val);
+    if (val) setUnreadCount(0);
+  };
+
+  const scrollToBottom = (behavior = 'smooth') => {
+    bottomRef.current?.scrollIntoView({ behavior });
+    setNearBottom(true);
+  };
+
+  // Attachment images/videos finish loading asynchronously, after the
+  // message list has already rendered and any scroll-to-bottom call has
+  // already run. That late height change was leaving the view stranded
+  // above the real bottom (looking like it "opened on an old message").
+  // A ResizeObserver on the message content re-anchors to the bottom
+  // whenever its height changes — but only while the user is already at
+  // (or was just brought to) the bottom, so it never fights someone who's
+  // deliberately scrolled up to read older messages.
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (isNearBottomRef.current) {
+        bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Belt-and-suspenders alongside the ResizeObserver above: explicitly find
+  // every image/video in the current message list that hasn't finished
+  // loading yet, and re-run the scroll-to-bottom the instant each one does.
+  // This removes any dependency on ResizeObserver support/timing quirks —
+  // it directly targets the actual cause (media loading after the initial
+  // render) rather than inferring it from a layout-size change.
+  useEffect(() => {
+    if (!isNearBottomRef.current) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const doScroll = () => bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+    doScroll();
+
+    const mediaEls = container.querySelectorAll('img, video');
+    const cleanups = [];
+    mediaEls.forEach((el) => {
+      const isImg = el.tagName === 'IMG';
+      const alreadyLoaded = isImg ? el.complete : el.readyState >= 1;
+      if (alreadyLoaded) return;
+      const evt = isImg ? 'load' : 'loadedmetadata';
+      const handler = () => {
+        if (isNearBottomRef.current) doScroll();
+      };
+      el.addEventListener(evt, handler);
+      cleanups.push(() => el.removeEventListener(evt, handler));
+    });
+
+    return () => cleanups.forEach((fn) => fn());
+  }, [messages]);
+
+  const loadMessages = async (conversationId, { forceScroll = false } = {}) => {
     if (!conversationId) return;
     const res = await chatAPI.getMessages(conversationId, { limit: 100 });
-    setMessages(res.data.messages || []);
-    requestAnimationFrame(() => {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    });
+    // Force chronological (oldest → newest) order regardless of what the
+    // API returns. Many "recent messages" endpoints return newest-first for
+    // pagination purposes; if we render that raw order, the newest message
+    // ends up at the TOP of the list and the oldest at the BOTTOM — so
+    // "scroll to bottom" was correctly landing on the true last DOM item,
+    // which was actually the oldest fetched message, not the newest.
+    const newMessages = [...(res.data.messages || [])].sort(
+      (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+    );
+    const added = newMessages.length - prevMessageCountRef.current;
+    setMessages(newMessages);
+    prevMessageCountRef.current = newMessages.length;
+
+    if (forceScroll) {
+      // Opening a conversation for the first time — always land at the bottom.
+      requestAnimationFrame(() => scrollToBottom('auto'));
+      return;
+    }
+    // Never yank the user's scroll position. If they're already sitting at
+    // the bottom, keep following new messages automatically. Otherwise,
+    // just bump the unread badge on the floating "jump to bottom" button.
+    if (added > 0) {
+      if (isNearBottomRef.current) {
+        requestAnimationFrame(() => scrollToBottom('smooth'));
+      } else {
+        setUnreadCount((c) => c + added);
+      }
+    }
   };
 
   useEffect(() => {
@@ -235,8 +351,33 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!activeConversationId) return;
-    loadMessages(activeConversationId);
+    prevMessageCountRef.current = 0;
+    setUnreadCount(0);
+    setNearBottom(true);
+    loadMessages(activeConversationId, { forceScroll: true });
   }, [activeConversationId]);
+
+  // Scrolls to a message by id and briefly highlights it. Used both for the
+  // "you were mentioned" notification deep-link (?conversation=...&message=...)
+  // and for clicking a reply-preview to jump to the original message.
+  const jumpToMessage = (id) => {
+    if (!id) return;
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) {
+      toast.error('Original message not loaded — try scrolling up to find it');
+      return;
+    }
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedMessageId(id);
+    setTimeout(() => setHighlightedMessageId((current) => (current === id ? '' : current)), 2500);
+  };
+
+  useEffect(() => {
+    const targetMessageId = searchParams.get('message');
+    if (!targetMessageId || messages.length === 0) return;
+    if (!messages.some((m) => m._id === targetMessageId)) return;
+    requestAnimationFrame(() => jumpToMessage(targetMessageId));
+  }, [messages, searchParams]);
 
   const activeParticipants = useMemo(() => {
     return (activeConversation?.participants || []).filter((p) => p && p._id !== user?._id);
@@ -309,35 +450,117 @@ export default function ChatPage() {
     });
   };
 
-  const MAX_FILE_MB = 25;
-  const ACCEPTED_TYPES = /^(image|video)\//;
+  const MAX_FILE_MB = 100;
+  const BLOCKED_EXTENSIONS = /\.(exe|bat|cmd|msi|dll|com|scr|jar|vbs|ps1|sh)$/i;
 
-  const handleFilesPicked = (fileList) => {
+  const fileKind = (file) => {
+    if (file.type.startsWith('image/')) return 'image';
+    if (file.type.startsWith('video/')) return 'video';
+    return 'file';
+  };
+
+  const handleFilesPicked = async (fileList) => {
     const files = Array.from(fileList || []);
     const accepted = [];
     for (const file of files) {
-      if (!ACCEPTED_TYPES.test(file.type)) {
-        toast.error(`${file.name}: only images and videos are supported`);
+      if (BLOCKED_EXTENSIONS.test(file.name)) {
+        toast.error(`${file.name}: this file type is not allowed`);
         continue;
       }
       if (file.size > MAX_FILE_MB * 1024 * 1024) {
         toast.error(`${file.name}: exceeds ${MAX_FILE_MB}MB limit`);
         continue;
       }
+      // Verify the file is actually readable. Cloud-sync placeholder files
+      // (OneDrive/Google Drive "Files On-Demand" — shown in Explorer with a
+      // cloud icon, not yet downloaded) report correct name/size and may
+      // even serve a small partial read, but fail once the browser tries to
+      // read the FULL file during upload — which is what breaks the actual
+      // send with ERR_FILE_NOT_FOUND. So we fully read it here, upfront,
+      // where a failure is caught cleanly instead of mid-upload.
+      //
+      // Drag-and-drop in particular can trigger a transient failure on the
+      // very first read attempt (some cloud-sync clients only start
+      // hydrating the real file content once the OS actually touches it),
+      // so we retry once after a short delay before concluding the file is
+      // genuinely unreadable.
+      try {
+        await file.arrayBuffer();
+      } catch (err) {
+        try {
+          await new Promise((r) => setTimeout(r, 500));
+          await file.arrayBuffer();
+        } catch (err2) {
+          console.error('File read failed:', file.name, err2?.name, err2?.message);
+          toast.error(`${file.name}: couldn't read this file. If it's in OneDrive/Google Drive, make sure it's downloaded (not "online-only") and try again`);
+          continue;
+        }
+      }
+      const kind = fileKind(file);
       accepted.push({
         file,
-        previewUrl: URL.createObjectURL(file),
-        kind: file.type.startsWith('video/') ? 'video' : 'image',
+        kind,
+        // Object URLs are only needed to preview/play images & videos.
+        previewUrl: kind === 'file' ? null : URL.createObjectURL(file),
       });
     }
     if (accepted.length) setPendingFiles((prev) => [...prev, ...accepted]);
+  };
+
+  // Uses a counter (not a boolean) because dragenter/dragleave fire for every
+  // child element too — a plain boolean would flicker off when the pointer
+  // crosses from the footer onto the input or attach button inside it.
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    if (!canCreate) return;
+    if (e.dataTransfer?.types?.includes('Files')) {
+      dragCounter.current += 1;
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    dragCounter.current = Math.max(0, dragCounter.current - 1);
+    if (dragCounter.current === 0) setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setIsDragging(false);
+    if (!canCreate) return;
+
+    // dataTransfer.files is the reliable, cross-browser source of the
+    // actual dropped files — same mechanism the <input type="file"> picker
+    // uses under the hood. We only use dataTransfer.items separately
+    // (best-effort, not supported identically everywhere) to detect
+    // dragged folders and show a clearer message; it does not affect which
+    // files actually get processed.
+    const items = e.dataTransfer.items;
+    if (items && items.length) {
+      const folderNames = [];
+      for (let i = 0; i < items.length; i++) {
+        const entry = items[i].webkitGetAsEntry?.();
+        if (entry && entry.isDirectory) folderNames.push(entry.name);
+      }
+      if (folderNames.length) {
+        toast.error(`${folderNames.join(', ')}: folders can't be attached, only individual files`);
+      }
+    }
+
+    handleFilesPicked(e.dataTransfer.files);
   };
 
   const removePendingFile = (idx) => {
     setPendingFiles((prev) => {
       const next = [...prev];
       const [removed] = next.splice(idx, 1);
-      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
       return next;
     });
   };
@@ -361,18 +584,24 @@ export default function ChatPage() {
       } else {
         res = await chatAPI.sendMessage(activeConversationId, { body, mentionIds, replyToId });
       }
-      setMessages((prev) => [...prev, res.data.message]);
+      setMessages((prev) => {
+        const next = [...prev, res.data.message];
+        prevMessageCountRef.current = next.length;
+        return next;
+      });
       setNewMessage('');
-      pendingFiles.forEach((pf) => URL.revokeObjectURL(pf.previewUrl));
+      pendingFiles.forEach((pf) => pf.previewUrl && URL.revokeObjectURL(pf.previewUrl));
       setPendingFiles([]);
       setMentionOpen(false);
       setReplyingTo(null);
-      requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-      });
+      requestAnimationFrame(() => scrollToBottom('smooth'));
       await refreshConversations();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to send');
+      if (!err.response && pendingFiles.length > 0) {
+        toast.error('Upload failed while reading a file — if it\'s in OneDrive/Google Drive, make sure it\'s fully downloaded (not "online-only") and try again');
+      } else {
+        toast.error(err.response?.data?.message || 'Failed to send');
+      }
     } finally {
       setSending(false);
       setUploading(false);
@@ -415,6 +644,19 @@ export default function ChatPage() {
   };
 
   const cancelReply = () => setReplyingTo(null);
+
+  const deleteMessage = async (message) => {
+    if (!confirm('Delete this message? This cannot be undone.')) return;
+    try {
+      await chatAPI.deleteMessage(message._id);
+      setMessages((prev) => prev.filter((m) => m._id !== message._id));
+      if (editingMessage?._id === message._id) cancelEdit();
+      if (replyingTo?._id === message._id) cancelReply();
+      toast.success('Message deleted');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to delete message');
+    }
+  };
 
   const copyLink = async (url) => {
     try {
@@ -620,7 +862,18 @@ export default function ChatPage() {
               </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gradient-to-b from-white to-slate-50">
+            <div className="relative flex-1 overflow-hidden">
+            <div
+              ref={messagesContainerRef}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+                // Small threshold so "basically at the bottom" still counts,
+                // without requiring pixel-perfect scroll position.
+                setNearBottom(distanceFromBottom < 120);
+              }}
+              className="h-full overflow-y-auto p-4 bg-gradient-to-b from-white to-slate-50">
+              <div ref={contentRef} className="space-y-3">
               {messages.length === 0 && (
                 <p className="text-sm text-gray-400">No messages yet. Start the conversation.</p>
               )}
@@ -635,6 +888,7 @@ export default function ChatPage() {
                     {group.messages.map((m) => {
                       const mine = m.sender?._id === user?._id;
                       const canEditThis = mine || ['super_admin', 'admin'].includes(user?.role);
+                      const canDeleteThis = mine || ['super_admin', 'admin', 'manager', 'team_lead'].includes(user?.role);
                       return (
                         <div key={m._id} className={`group flex ${mine ? 'justify-end' : 'justify-start'}`}>
                           <div className={`flex items-end gap-1.5 max-w-[75%] ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -662,16 +916,47 @@ export default function ChatPage() {
                                   </svg>
                                 </button>
                               )}
+                              {canDeleteThis && (
+                                <button
+                                  type="button"
+                                  title="Delete"
+                                  onClick={() => deleteMessage(m)}
+                                  className="w-6 h-6 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-200 flex items-center justify-center"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              )}
                             </div>
 
-                            <div className={`rounded-2xl px-3 py-2 shadow-sm ${mine ? 'bg-[var(--brand-primary)] text-white' : 'bg-white text-gray-800 border border-gray-200'}`}>
+                            <div
+                              id={`msg-${m._id}`}
+                              className={`rounded-2xl px-3 py-2 shadow-sm transition-shadow ${mine ? 'bg-[var(--brand-primary)] text-white' : 'bg-white text-gray-800 border border-gray-200'} ${highlightedMessageId === m._id ? 'ring-2 ring-amber-400 ring-offset-2' : ''}`}
+                            >
                               <div className={`text-[11px] mb-1 ${mine ? 'text-white/80' : 'text-gray-400'}`}>
                                 {m.sender?.name || 'Unknown'} · {formatTime(m.createdAt)}
                                 {m.editedAt && <span className="italic"> · edited</span>}
                               </div>
 
                               {m.replyTo && (
-                                <div className={`mb-1.5 rounded-lg px-2 py-1 border-l-2 text-xs ${mine ? 'border-white/50 bg-white/10 text-white/90' : 'border-[var(--brand-primary)] bg-gray-50 text-gray-600'}`}>
+                                <div
+                                  onClick={
+                                    m.replyTo.deletedAt
+                                      ? undefined
+                                      : (e) => {
+                                          e.stopPropagation();
+                                          jumpToMessage(m.replyTo._id);
+                                        }
+                                  }
+                                  className={`mb-1.5 rounded-lg px-2 py-1 border-l-2 text-xs transition-colors ${
+                                    m.replyTo.deletedAt ? '' : 'cursor-pointer'
+                                  } ${
+                                    mine
+                                      ? `border-white/50 bg-white/10 text-white/90 ${!m.replyTo.deletedAt ? 'hover:bg-white/20' : ''}`
+                                      : `border-[var(--brand-primary)] bg-gray-50 text-gray-600 ${!m.replyTo.deletedAt ? 'hover:bg-gray-100' : ''}`
+                                  }`}
+                                >
                                   <div className="font-medium">{m.replyTo.deletedAt ? 'Original message' : (m.replyTo.sender?.name || 'Unknown')}</div>
                                   <div className="truncate">
                                     {m.replyTo.deletedAt
@@ -684,34 +969,70 @@ export default function ChatPage() {
                               {!!m.attachments?.length && (
                                 <div className="mb-1.5 space-y-1.5">
                                   {m.attachments.map((att, i) => {
-                                    const isVideo = /\.(mp4|webm|mov|ogg)$/i.test(att.originalname || att.path || '');
+                                    const name = att.originalname || att.path || 'file';
+                                    const isImage = /\.(jpe?g|png|gif|webp|bmp|svg)$/i.test(name);
+                                    const isVideo = /\.(mp4|webm|mov|ogg|mkv)$/i.test(name);
                                     const url = getAssetUrl(att.path);
-                                    return (
-                                      <div key={i} className="rounded-lg overflow-hidden border border-black/10">
-                                        {isVideo ? (
+
+                                    if (isVideo) {
+                                      return (
+                                        <div key={i} className="rounded-lg overflow-hidden border border-black/10">
                                           <video
                                             src={url}
                                             controls
                                             className="max-w-full max-h-64 cursor-pointer"
                                             onClick={() => setLightbox({ url, kind: 'video' })}
                                           />
-                                        ) : (
+                                          <a
+                                            href={url}
+                                            download={att.originalname}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className={`flex items-center justify-center gap-1 text-[11px] py-1 ${mine ? 'text-white/90 bg-white/10' : 'text-gray-600 bg-gray-50'}`}
+                                          >
+                                            Download
+                                          </a>
+                                        </div>
+                                      );
+                                    }
+
+                                    if (isImage) {
+                                      return (
+                                        <div key={i} className="rounded-lg overflow-hidden border border-black/10">
                                           <img
                                             src={url}
-                                            alt={att.originalname || 'attachment'}
+                                            alt={name}
                                             className="max-w-full max-h-64 object-cover cursor-pointer"
                                             onClick={() => setLightbox({ url, kind: 'image' })}
                                           />
-                                        )}
-                                        <a
-                                          href={url}
-                                          download={att.originalname}
-                                          onClick={(e) => e.stopPropagation()}
-                                          className={`flex items-center justify-center gap-1 text-[11px] py-1 ${mine ? 'text-white/90 bg-white/10' : 'text-gray-600 bg-gray-50'}`}
-                                        >
-                                          Download
-                                        </a>
-                                      </div>
+                                          <a
+                                            href={url}
+                                            download={att.originalname}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className={`flex items-center justify-center gap-1 text-[11px] py-1 ${mine ? 'text-white/90 bg-white/10' : 'text-gray-600 bg-gray-50'}`}
+                                          >
+                                            Download
+                                          </a>
+                                        </div>
+                                      );
+                                    }
+
+                                    // Generic file (PDF, Doc, Excel, ZIP, etc.)
+                                    return (
+                                      <a
+                                        key={i}
+                                        href={url}
+                                        download={att.originalname}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${mine ? 'border-white/20 bg-white/10 hover:bg-white/15' : 'border-gray-200 bg-gray-50 hover:bg-gray-100'}`}
+                                      >
+                                        <svg className={`w-6 h-6 shrink-0 ${mine ? 'text-white/90' : 'text-gray-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        <div className="min-w-0 flex-1">
+                                          <div className={`text-xs font-medium truncate ${mine ? 'text-white' : 'text-gray-800'}`}>{name}</div>
+                                          <div className={`text-[10px] ${mine ? 'text-white/70' : 'text-gray-400'}`}>{formatBytes(att.size)} · Download</div>
+                                        </div>
+                                      </a>
                                     );
                                   })}
                                 </div>
@@ -735,9 +1056,45 @@ export default function ChatPage() {
                 </div>
               ))}
               <div ref={bottomRef} />
+              </div>
             </div>
 
-            <footer className="p-3 border-t border-gray-100 flex flex-col gap-2">
+            {!atBottom && (
+              <button
+                type="button"
+                onClick={() => scrollToBottom('smooth')}
+                className="absolute bottom-4 right-4 flex items-center gap-1.5 pl-3 pr-3.5 py-2 rounded-full bg-white border border-gray-200 shadow-lg text-gray-600 hover:bg-gray-50 transition-colors"
+                title="Jump to latest messages"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                </svg>
+                {unreadCount > 0 && (
+                  <span className="text-xs font-semibold text-white bg-[var(--brand-primary)] rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </button>
+            )}
+            </div>
+
+            <footer
+              className="relative p-3 border-t border-gray-100 flex flex-col gap-2"
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {isDragging && canCreate && (
+                <div className="absolute inset-0 z-10 bg-[var(--brand-primary)]/5 border-2 border-dashed border-[var(--brand-primary)] rounded-lg flex items-center justify-center pointer-events-none">
+                  <div className="flex flex-col items-center gap-1 text-[var(--brand-primary)]">
+                    <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 12v9m0-9l-3 3m3-3l3 3" />
+                    </svg>
+                    <span className="text-sm font-medium">Drop files to attach</span>
+                  </div>
+                </div>
+              )}
               {editingMessage && (
                 <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 text-xs text-amber-800">
                   <span>Editing your message</span>
@@ -759,8 +1116,15 @@ export default function ChatPage() {
                     <div key={idx} className="relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
                       {pf.kind === 'video' ? (
                         <video src={pf.previewUrl} className="w-full h-full object-cover" />
-                      ) : (
+                      ) : pf.kind === 'image' ? (
                         <img src={pf.previewUrl} alt={pf.file.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center gap-0.5 p-1">
+                          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          <span className="text-[9px] text-gray-500 leading-tight text-center break-all line-clamp-2">{pf.file.name}</span>
+                        </div>
                       )}
                       <button
                         type="button"
@@ -779,7 +1143,6 @@ export default function ChatPage() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept="image/*,video/*"
                       multiple
                       className="hidden"
                       onChange={(e) => {
@@ -791,7 +1154,7 @@ export default function ChatPage() {
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       className="shrink-0 w-9 h-9 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex items-center justify-center"
-                      title="Attach image or video"
+                      title="Attach a file"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 10-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
