@@ -176,6 +176,19 @@ export default function ChatPage() {
   const [lightbox, setLightbox] = useState(null); // { url, kind } or null
   const [savingEdit, setSavingEdit] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
+  const [pendingDeleteIds, setPendingDeleteIds] = useState(new Set());
+  const deleteTimersRef = useRef({});
+  // Pinning: pinnedMessageId is the _id of the currently pinned message, or null.
+  // In groups, pin is visible to everyone (stored on the conversation).
+  // In direct chats, pin is self-only (stored locally in state).
+  const [pinnedMessageId, setPinnedMessageId] = useState(null);
+  const [pinningLoading, setPinningLoading] = useState(false);
+
+  // In-chat message search
+  const [showMessageSearch, setShowMessageSearch] = useState(false);
+  const [messageSearchQuery, setMessageSearchQuery] = useState('');
+  const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
+  const messageSearchInputRef = useRef(null);
 
   // --- Per-message "..." action menu ---
   const [openActionMenuId, setOpenActionMenuId] = useState('');
@@ -207,6 +220,31 @@ export default function ChatPage() {
   const [forwarding, setForwarding] = useState(false);
 
   const messageGroups = useMemo(() => groupMessagesByDate(messages), [messages]);
+
+  // In-chat message search results — messages whose body matches the search query
+  const messageSearchResults = useMemo(() => {
+    const q = messageSearchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return messages
+      .map((m, idx) => ({ message: m, index: idx }))
+      .filter(({ message: m }) => (m.body || '').toLowerCase().includes(q));
+  }, [messages, messageSearchQuery]);
+
+  const navigateSearchResult = (direction) => {
+    if (messageSearchResults.length === 0) return;
+    const nextIndex = direction === 'next'
+      ? (activeSearchResultIndex + 1) % messageSearchResults.length
+      : (activeSearchResultIndex - 1 + messageSearchResults.length) % messageSearchResults.length;
+    setActiveSearchResultIndex(nextIndex);
+    const msgId = messageSearchResults[nextIndex].message._id;
+    jumpToMessage(msgId);
+  };
+
+  const closeMessageSearch = () => {
+    setShowMessageSearch(false);
+    setMessageSearchQuery('');
+    setActiveSearchResultIndex(0);
+  };
 
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
@@ -462,6 +500,14 @@ export default function ChatPage() {
     };
   }, [canRead, canCreate, user?._id]);
 
+  // Clean up all pending delete timers when the component unmounts
+  useEffect(() => {
+    return () => {
+      Object.values(deleteTimersRef.current).forEach(clearTimeout);
+      deleteTimersRef.current = {};
+    };
+  }, []);
+
   useEffect(() => {
     const requested = searchParams.get('conversation');
     if (!requested || !conversations.length) return;
@@ -475,6 +521,14 @@ export default function ChatPage() {
     prevMessageCountRef.current = 0;
     setUnreadCount(0);
     setNearBottom(true);
+    // For group chats, load the pinned message from the conversation data
+    // (persistent on server). For direct chats, reset to null (self-scope).
+    const conv = conversations.find((c) => c._id === activeConversationId);
+    if (conv?.type === 'group' && conv.pinnedMessage?._id) {
+      setPinnedMessageId(conv.pinnedMessage._id);
+    } else {
+      setPinnedMessageId(null);
+    }
     loadMessages(activeConversationId, { forceScroll: true });
   }, [activeConversationId]);
 
@@ -779,17 +833,106 @@ export default function ChatPage() {
 
   const cancelReply = () => setReplyingTo(null);
 
-  const deleteMessage = async (message) => {
-    if (!confirm('Delete this message? This cannot be undone.')) return;
+  // The pinned message object (from the current messages list), or null.
+  const activePinnedMessage = useMemo(
+    () => (pinnedMessageId ? messages.find((m) => m._id === pinnedMessageId) : null),
+    [messages, pinnedMessageId]
+  );
+
+  // Pin/unpin a message.
+  // In group chats, scope is 'everyone' — visible to all members.
+  // In direct chats, scope is 'self' — only visible to the pinner.
+  const handlePin = async (message) => {
+    if (!activeConversation || pinningLoading) return;
+    const isGroup = activeConversation.type === 'group';
+    const scope = isGroup ? 'everyone' : 'self';
+    setPinningLoading(true);
     try {
-      await chatAPI.deleteMessage(message._id);
-      setMessages((prev) => prev.filter((m) => m._id !== message._id));
-      if (editingMessage?._id === message._id) cancelEdit();
-      if (replyingTo?._id === message._id) cancelReply();
-      toast.success('Message deleted');
+      await chatAPI.pinMessage(message._id, { scope });
+      setPinnedMessageId(message._id);
+      toast.success('Message pinned');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to delete message');
+      toast.error(err.response?.data?.message || 'Failed to pin message');
+    } finally {
+      setPinningLoading(false);
     }
+  };
+
+  const handleUnpin = async () => {
+    if (!pinnedMessageId || !activeConversation || pinningLoading) return;
+    const isGroup = activeConversation.type === 'group';
+    const scope = isGroup ? 'everyone' : 'self';
+    setPinningLoading(true);
+    try {
+      await chatAPI.unpinMessage(pinnedMessageId, { scope });
+      setPinnedMessageId(null);
+      toast.success('Message unpinned');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to unpin message');
+    } finally {
+      setPinningLoading(false);
+    }
+  };
+
+  // Soft-delete a message: mark it as pending deletion, show an "Undo" toast,
+  // and wait 5 seconds before actually calling the API to permanently delete it.
+  const deleteMessage = (message) => {
+    // Mark the message as pending deletion immediately (gray it out in the UI)
+    setPendingDeleteIds((prev) => new Set(prev).add(message._id));
+
+    // Show toast with Undo button
+    const toastId = toast(
+      (t) => (
+        <div className="flex items-center gap-3">
+          <span className="text-sm">Message deleted</span>
+          <button
+            className="text-sm font-semibold text-[var(--brand-primary)] hover:underline"
+            onClick={() => {
+              // Undo: restore the message and clear the timer
+              setPendingDeleteIds((prev) => {
+                const next = new Set(prev);
+                next.delete(message._id);
+                return next;
+              });
+              clearTimeout(deleteTimersRef.current[message._id]);
+              delete deleteTimersRef.current[message._id];
+              toast.dismiss(t.id);
+              toast.success('Message restored');
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      ),
+      { duration: 5000 }
+    );
+
+    // Schedule the actual API call + removal after 5 seconds
+    deleteTimersRef.current[message._id] = setTimeout(async () => {
+      try {
+        await chatAPI.deleteMessage(message._id);
+        setMessages((prev) => prev.filter((m) => m._id !== message._id));
+        if (editingMessage?._id === message._id) cancelEdit();
+        if (replyingTo?._id === message._id) cancelReply();
+        setPendingDeleteIds((prev) => {
+          const next = new Set(prev);
+          next.delete(message._id);
+          return next;
+        });
+        delete deleteTimersRef.current[message._id];
+        toast.dismiss(toastId);
+        toast.success('Message permanently deleted');
+      } catch (err) {
+        toast.error(err.response?.data?.message || 'Failed to delete message');
+        // On API failure, restore the message in the UI
+        setPendingDeleteIds((prev) => {
+          const next = new Set(prev);
+          next.delete(message._id);
+          return next;
+        });
+        delete deleteTimersRef.current[message._id];
+      }
+    }, 5000);
   };
 
   const copyLink = async (url) => {
@@ -1168,6 +1311,27 @@ export default function ChatPage() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  title="Search in this chat"
+                  onClick={() => {
+                    if (showMessageSearch) {
+                      closeMessageSearch();
+                    } else {
+                      setShowMessageSearch(true);
+                      requestAnimationFrame(() => messageSearchInputRef.current?.focus());
+                    }
+                  }}
+                  className={`shrink-0 w-8 h-8 rounded-lg border flex items-center justify-center transition-colors ${
+                    showMessageSearch
+                      ? 'border-[var(--brand-primary)] text-[var(--brand-primary)] bg-blue-50'
+                      : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </button>
                 {activeConversation.type === 'group' && isActiveConvAdmin && (
                   <button
                     type="button"
@@ -1194,6 +1358,120 @@ export default function ChatPage() {
               </div>
             </header>
 
+            {showMessageSearch && (
+              <div className="border-b border-gray-100 px-4 py-2.5 bg-white">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <input
+                      ref={messageSearchInputRef}
+                      className="input pl-8 pr-3 text-sm"
+                      placeholder="Search messages..."
+                      value={messageSearchQuery}
+                      onChange={(e) => {
+                        setMessageSearchQuery(e.target.value);
+                        setActiveSearchResultIndex(0);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (e.shiftKey) {
+                            navigateSearchResult('prev');
+                          } else {
+                            navigateSearchResult('next');
+                          }
+                        }
+                        if (e.key === 'Escape') {
+                          closeMessageSearch();
+                        }
+                      }}
+                    />
+                  </div>
+                  {messageSearchResults.length > 0 && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-xs text-gray-500 mr-1">
+                        {activeSearchResultIndex + 1}/{messageSearchResults.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => navigateSearchResult('prev')}
+                        className="w-7 h-7 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex items-center justify-center"
+                        title="Previous result (Shift+Enter)"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => navigateSearchResult('next')}
+                        className="w-7 h-7 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex items-center justify-center"
+                        title="Next result (Enter)"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                  {messageSearchResults.length === 0 && messageSearchQuery.trim() && (
+                    <span className="text-xs text-gray-400 shrink-0">No results</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={closeMessageSearch}
+                    className="shrink-0 w-7 h-7 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-700 hover:bg-gray-50 flex items-center justify-center"
+                    title="Close search"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Pinned message banner — fixed/sticky at the top, never scrolls away */}
+            {activePinnedMessage && !pendingDeleteIds.has(activePinnedMessage._id) && (
+              <div className="sticky top-0 z-10 bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center gap-3 shadow-sm">
+                <div className="shrink-0">
+                  <svg className="w-4 h-4 text-amber-600" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                  </svg>
+                </div>
+                <div className="min-w-0 flex-1 text-xs text-amber-900">
+                  <div className="font-medium truncate">
+                    Pinned by {activePinnedMessage.sender?.name || 'Unknown'}
+                  </div>
+                  <div className="truncate text-amber-700">
+                    {activePinnedMessage.body || (activePinnedMessage.attachments?.length ? '📎 Attachment' : '')}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  title="Unpin"
+                  onClick={() => {
+                    setOpenActionMenuId('');
+                    handleUnpin();
+                  }}
+                  disabled={pinningLoading}
+                  className="shrink-0 text-xs px-2 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                >
+                  Unpin
+                </button>
+                <button
+                  type="button"
+                  title="Scroll to pinned message"
+                  onClick={() => jumpToMessage(activePinnedMessage._id)}
+                  className="shrink-0 text-xs px-2 py-1 rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"
+                >
+                  View
+                </button>
+              </div>
+            )}
+
             <div className="relative flex-1 overflow-hidden">
             <div
               ref={messagesContainerRef}
@@ -1210,6 +1488,7 @@ export default function ChatPage() {
               {messages.length === 0 && (
                 <p className="text-sm text-gray-400">No messages yet. Start the conversation.</p>
               )}
+
               {messageGroups.map((group) => (
                 <div key={group.dateLabel + group.messages[0]._id}>
                   <div className="flex justify-center my-3">
@@ -1298,7 +1577,39 @@ export default function ChatPage() {
                                     </button>
                                   )}
 
-                                  {canDeleteThis && (
+                                  {pinnedMessageId === m._id ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenActionMenuId('');
+                                        handleUnpin();
+                                      }}
+                                      disabled={pinningLoading}
+                                      className="w-full text-left px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-50 flex items-center gap-2"
+                                    >
+                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 4v12l4 4H4l4-4V4m4 0h-2m2 0h2" />
+                                      </svg>
+                                      Unpin
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenActionMenuId('');
+                                        handlePin(m);
+                                      }}
+                                      disabled={pinningLoading}
+                                      className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                                    >
+                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                      </svg>
+                                      {pinnedMessageId ? 'Pin Latest' : 'Pin'}
+                                    </button>
+                                  )}
+
+                                  {canDeleteThis && !pendingDeleteIds.has(m._id) && (
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -1319,7 +1630,13 @@ export default function ChatPage() {
 
                             <div
                               id={`msg-${m._id}`}
-                              className={`rounded-2xl px-3 py-2 shadow-sm transition-shadow ${mine ? 'bg-[var(--brand-primary)] text-white' : 'bg-white text-gray-800 border border-gray-200'} ${highlightedMessageId === m._id ? 'ring-2 ring-amber-400 ring-offset-2' : ''}`}
+                              className={`rounded-2xl px-3 py-2 shadow-sm transition-shadow ${
+                                pendingDeleteIds.has(m._id)
+                                  ? 'bg-gray-100 text-gray-400 border border-gray-200 opacity-60'
+                                  : mine
+                                    ? 'bg-[var(--brand-primary)] text-white'
+                                    : 'bg-white text-gray-800 border border-gray-200'
+                              } ${highlightedMessageId === m._id ? 'ring-2 ring-amber-400 ring-offset-2' : ''}`}
                             >
                               <div className={`text-[11px] mb-1 ${mine ? 'text-white/80' : 'text-gray-400'}`}>
                                 {m.sender?.name || 'Unknown'} · {formatTime(m.createdAt)}

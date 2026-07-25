@@ -218,6 +218,9 @@ export const chatAPI = {
   },
   updateMessage: (messageId, data) => api.put(`/chat/messages/${messageId}`, data),
   deleteMessage: (messageId) => api.delete(`/chat/messages/${messageId}`),
+  // Pin/unpin a message. Scope: 'everyone' (group chats) or 'self' (direct chats)
+  pinMessage: (messageId, data) => api.post(`/chat/messages/${messageId}/pin`, data),
+  unpinMessage: (messageId, data) => api.post(`/chat/messages/${messageId}/unpin`, data),
 };
 
 export default api;
