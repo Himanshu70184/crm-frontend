@@ -68,6 +68,14 @@ function formatBytes(bytes) {
 
 const URL_REGEX = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,:;"')\]])/gi;
 
+// Strips @mention patterns (like @admin.user, @super.admin) from text
+// so they don't appear duplicated in the message body — only in the "Mentioned:" section.
+function stripMentions(text) {
+  if (!text) return text;
+  // Remove @handle patterns (word characters, dots, hyphens, underscores after @)
+  return text.replace(/@[a-z0-9._-]+/gi, '').replace(/\s{2,}/g, ' ').trim();
+}
+
 // Splits message text around URLs, rendering plain text as-is and URLs as
 // clickable links (open in a new tab) with an adjacent copy-link button.
 function linkifyMessage(text, mine, onCopyLink) {
@@ -574,16 +582,32 @@ export default function ChatPage() {
   const mentionCandidates = useMemo(() => {
     if (!mentionQuery && !mentionOpen) return [];
     const q = mentionQuery.toLowerCase();
-    return activeParticipants
+    // Always add @everyone as the first option if it matches the query
+    const everyoneCandidate = {
+      _id: '@everyone',
+      name: 'Everyone',
+      handle: 'everyone',
+      isEveryone: true,
+    };
+    const everyoneMatch = !q || 'everyone'.includes(q) || 'everyone'.includes(q);
+    const people = activeParticipants
       .map((p) => ({
         ...p,
         handle: String(p.name || '').trim().toLowerCase().replace(/\s+/g, '.'),
       }))
       .filter((p) => !q || p.name?.toLowerCase().includes(q) || p.handle.includes(q))
-      .slice(0, 8);
+      .slice(0, 7);
+    const result = [];
+    if (everyoneMatch) result.push(everyoneCandidate);
+    return [...result, ...people];
   }, [activeParticipants, mentionQuery, mentionOpen]);
 
   const extractMentionIds = (text) => {
+    const textLower = String(text || '').toLowerCase();
+    // If @everyone is present, return ALL participant IDs
+    if (textLower.includes('@everyone')) {
+      return activeParticipants.map((p) => p._id);
+    }
     const handleMap = new Map(
       activeParticipants.map((p) => [String(p.name || '').trim().toLowerCase().replace(/\s+/g, '.'), p._id])
     );
@@ -1628,6 +1652,12 @@ export default function ChatPage() {
                               )}
                             </div>
 
+                            <div className="flex flex-col gap-0.5 max-w-full">
+                              <div className={`text-[11px] px-1 ${mine ? 'text-right' : 'text-left'} ${mine ? 'text-gray-400' : 'text-gray-400'}`}>
+                                {m.sender?.name || 'Unknown'} · {formatTime(m.createdAt)}
+                                {m.editedAt && <span className="italic"> · edited</span>}
+                              </div>
+
                             <div
                               id={`msg-${m._id}`}
                               className={`rounded-2xl px-3 py-2 shadow-sm transition-shadow ${
@@ -1638,10 +1668,6 @@ export default function ChatPage() {
                                     : 'bg-white text-gray-800 border border-gray-200'
                               } ${highlightedMessageId === m._id ? 'ring-2 ring-amber-400 ring-offset-2' : ''}`}
                             >
-                              <div className={`text-[11px] mb-1 ${mine ? 'text-white/80' : 'text-gray-400'}`}>
-                                {m.sender?.name || 'Unknown'} · {formatTime(m.createdAt)}
-                                {m.editedAt && <span className="italic"> · edited</span>}
-                              </div>
 
                               {m.replyTo && (
                                 <div
@@ -1741,16 +1767,40 @@ export default function ChatPage() {
                                   })}
                                 </div>
                               )}
-                              {!!m.body && (
-                                <p className="text-sm whitespace-pre-wrap break-words">
-                                  {linkifyMessage(m.body, mine, copyLink)}
-                                </p>
-                              )}
-                              {!!m.mentions?.length && (
-                                <div className={`mt-1 text-[11px] ${mine ? 'text-white/80' : 'text-indigo-600'}`}>
-                                  Mentioned: {m.mentions.map((x) => x.name).join(', ')}
+                               {!!m.mentions?.length && (
+                                <div className={`mt-1 text-[12px] ${mine ? 'text-white/80' : 'text-indigo-600'}`}>
+                                  {m.body?.toLowerCase().includes('@everyone') ? (
+                                    <span><span className="font-semibold text-sm">@everyone</span></span>
+                                  ) : (
+                                    <>
+                                      {/* <span className="mr-1">Mentioned:</span> */}
+                                      {m.mentions.map((x, i) => (
+                                        <span key={x._id || i}>
+                                          {i > 0 && <span className="mx-1">·</span>}
+                                          <span
+                                            className={
+                                              x._id === user?._id
+                                                ? 'font-bold text-sm text-[var(--brand-primary)]'
+                                                : mine
+                                                  ? 'text-white/90'
+                                                  : 'text-emerald-600'
+                                            }
+                                          >
+                                            @{x.name}
+                                          </span>
+                                        </span>
+                                      ))}
+                                    </>
+                                  )}
                                 </div>
                               )}
+                              {!!m.body && (
+                                <p className="text-sm whitespace-pre-wrap break-words">
+                                  {linkifyMessage(stripMentions(m.body), mine, copyLink)}
+                                </p>
+                              )}
+                             
+                            </div>
                             </div>
                           </div>
                         </div>
@@ -1937,8 +1987,20 @@ export default function ChatPage() {
                       onClick={() => insertMention(candidate)}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${idx === mentionIndex ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50 text-gray-700'}`}
                     >
-                      <div className="font-medium">{candidate.name}</div>
+                      <div className="font-medium flex items-center gap-2">
+                        {candidate.isEveryone && (
+                          <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                        )}
+                        {candidate.name}
+                      </div>
                       <div className="text-xs text-gray-400">@{candidate.handle}</div>
+                      {candidate.isEveryone && (
+                        <div className="text-[10px] text-indigo-500 mt-0.5">
+                          Notify all participants in this conversation
+                        </div>
+                      )}
                     </button>
                   ))}
                 </div>
