@@ -193,6 +193,15 @@ export const chatAPI = {
   getConversations: (params) => api.get('/chat/conversations', { params }),
   createConversation: (data) => api.post('/chat/conversations', data),
   getConversationMembers: (conversationId) => api.get(`/chat/conversations/${conversationId}/members`),
+  // NEW — add one or more users to an existing group. Only group admins may call this.
+  addMembers: (conversationId, participantIds) =>
+    api.post(`/chat/conversations/${conversationId}/members`, { participantIds }),
+  // NEW — remove a single member from a group. Only group admins may call this.
+  removeMember: (conversationId, userId) =>
+    api.delete(`/chat/conversations/${conversationId}/members/${userId}`),
+  // NEW — promote (isAdmin: true) or revoke (isAdmin: false) a member's group-admin status.
+  setAdmin: (conversationId, userId, isAdmin) =>
+    api.put(`/chat/conversations/${conversationId}/admins/${userId}`, { isAdmin }),
   leaveConversation: (conversationId) => api.post(`/chat/conversations/${conversationId}/leave`),
   getMessages: (conversationId, params) => api.get(`/chat/conversations/${conversationId}/messages`, { params }),
   sendMessage: (conversationId, data) => {

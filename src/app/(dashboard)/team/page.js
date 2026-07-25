@@ -121,7 +121,8 @@ export default function TeamPage() {
           {users.map((u) => (
             <div key={u._id} className="card p-5">
               <div className="flex items-start justify-between mb-3">
-                <div className="w-12 h-12 rounded-full bg-primary-600 text-white text-lg flex items-center justify-center font-bold">
+                <div className="w-12 h-12 rounded-full bg-primary-600 text-white text-lg flex items-center justify-center font-bold"
+                style={{ background: `linear-gradient(135deg, var(--brand-primary), var(--brand-accent))` }}>
                   {u.name?.charAt(0).toUpperCase()}
                 </div>
                 <span className={`badge ${ROLE_COLORS[u.role]}`}>{formatRole(u.role)}</span>

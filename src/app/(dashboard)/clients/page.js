@@ -122,7 +122,8 @@ export default function ClientsPage() {
           return (
             <div key={client._id} className="card-hover p-5">
               <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white font-bold">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white font-bold"
+                style={{ background: `linear-gradient(135deg, var(--brand-primary), var(--brand-accent))` }}>
                   {client.name?.charAt(0)}
                 </div>
                 <div className="flex justify-between flex-1 ">

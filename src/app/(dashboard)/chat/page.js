@@ -145,6 +145,12 @@ export default function ChatPage() {
   const [mentionCursor, setMentionCursor] = useState(0);
   const [mentionIndex, setMentionIndex] = useState(0);
 
+  // --- Group member management (add member / remove member / assign admin) ---
+  const [showAddMembers, setShowAddMembers] = useState(false);
+  const [addMemberIds, setAddMemberIds] = useState([]);
+  const [addingMembers, setAddingMembers] = useState(false);
+  const [memberActionLoading, setMemberActionLoading] = useState(''); // userId currently being acted on
+
   const bottomRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const contentRef = useRef(null);
@@ -497,6 +503,19 @@ export default function ChatPage() {
   const activeParticipants = useMemo(() => {
     return (activeConversation?.participants || []).filter((p) => p && p._id !== user?._id);
   }, [activeConversation, user?._id]);
+
+  // Whether the logged-in user is a group admin of the active conversation.
+  // Only relevant for group chats — direct chats have no admins/no group management.
+  const isActiveConvAdmin = useMemo(() => {
+    if (!activeConversation || activeConversation.type !== 'group') return false;
+    return (activeConversation.admins || []).some((a) => (a._id || a) === user?._id);
+  }, [activeConversation, user?._id]);
+
+  // People not already in the active group — candidates for "Add Member".
+  const availableToAdd = useMemo(() => {
+    const existingIds = new Set((activeConversation?.participants || []).map((p) => p._id));
+    return people.filter((p) => !existingIds.has(p._id));
+  }, [people, activeConversation]);
 
   const mentionCandidates = useMemo(() => {
     if (!mentionQuery && !mentionOpen) return [];
@@ -953,6 +972,62 @@ export default function ChatPage() {
     }
   };
 
+  // --- Group member management handlers ---
+
+  const openAddMembers = () => {
+    setAddMemberIds([]);
+    setShowAddMembers(true);
+  };
+
+  const toggleAddMemberId = (id) => {
+    setAddMemberIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const submitAddMembers = async () => {
+    if (!activeConversationId || addMemberIds.length === 0) return;
+    setAddingMembers(true);
+    try {
+      await chatAPI.addMembers(activeConversationId, addMemberIds);
+      toast.success('Members added');
+      setShowAddMembers(false);
+      setAddMemberIds([]);
+      await refreshConversations();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to add members');
+    } finally {
+      setAddingMembers(false);
+    }
+  };
+
+  const removeGroupMember = async (memberId) => {
+    if (!activeConversationId) return;
+    if (!confirm('Remove this member from the group?')) return;
+    setMemberActionLoading(memberId);
+    try {
+      await chatAPI.removeMember(activeConversationId, memberId);
+      toast.success('Member removed');
+      await refreshConversations();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to remove member');
+    } finally {
+      setMemberActionLoading('');
+    }
+  };
+
+  const toggleMemberAdmin = async (memberId, makeAdmin) => {
+    if (!activeConversationId) return;
+    setMemberActionLoading(memberId);
+    try {
+      await chatAPI.setAdmin(activeConversationId, memberId, makeAdmin);
+      toast.success(makeAdmin ? 'Promoted to admin' : 'Admin role removed');
+      await refreshConversations();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update admin status');
+    } finally {
+      setMemberActionLoading('');
+    }
+  };
+
   if (!canRead) {
     return (
       <div className="card p-8 text-center">
@@ -1093,6 +1168,15 @@ export default function ChatPage() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {activeConversation.type === 'group' && isActiveConvAdmin && (
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs py-1.5"
+                    onClick={openAddMembers}
+                  >
+                    + Add Member
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn-secondary text-xs py-1.5"
@@ -1577,19 +1661,110 @@ export default function ChatPage() {
                 </svg>
               </button>
             </div>
+
+            {activeConversation.type === 'group' && isActiveConvAdmin && (
+              <div className="px-5 py-3 border-b border-gray-100">
+                <button
+                  type="button"
+                  className="btn-primary w-full text-xs py-2"
+                  onClick={openAddMembers}
+                >
+                  + Add Member
+                </button>
+              </div>
+            )}
+
             <div className="max-h-[420px] overflow-auto p-3 space-y-2">
-              {(activeConversation.participants || []).map((member) => (
-                <div key={member._id} className="px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-semibold">
-                    {initials(member.name)}
+              {(activeConversation.participants || []).map((member) => {
+                const memberIsAdmin = (activeConversation.admins || []).some(
+                  (a) => (a._id || a) === member._id
+                );
+                const isSelf = member._id === user?._id;
+                const acting = memberActionLoading === member._id;
+                return (
+                  <div key={member._id} className="px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-semibold shrink-0">
+                      {initials(member.name)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">
+                        <span className="truncate">{member.name}</span>
+                        {memberIsAdmin && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 shrink-0">Admin</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-400 truncate">{member.email}</div>
+                    </div>
+                    <span className="text-[11px] px-2 py-1 rounded-full bg-gray-100 text-gray-600 capitalize shrink-0">
+                      {member.role?.replace('_', ' ')}
+                    </span>
+
+                    {activeConversation.type === 'group' && isActiveConvAdmin && !isSelf && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          disabled={acting}
+                          title={memberIsAdmin ? 'Remove admin' : 'Make admin'}
+                          onClick={() => toggleMemberAdmin(member._id, !memberIsAdmin)}
+                          className="text-[11px] px-2 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          {memberIsAdmin ? 'Revoke' : 'Make Admin'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={acting}
+                          title="Remove from group"
+                          onClick={() => removeGroupMember(member._id)}
+                          className="text-[11px] px-2 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-gray-900 truncate">{member.name}</div>
-                    <div className="text-xs text-gray-400 truncate">{member.email}</div>
-                  </div>
-                  <span className="text-[11px] px-2 py-1 rounded-full bg-gray-100 text-gray-600 capitalize">{member.role?.replace('_', ' ')}</span>
-                </div>
-              ))}
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddMembers && activeConversation && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+              <h3 className="text-base font-semibold text-gray-900">Add Members</h3>
+              <button type="button" className="text-gray-400 hover:text-gray-700" onClick={() => setShowAddMembers(false)}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+              {availableToAdd.length === 0 && (
+                <p className="text-sm text-gray-400 p-2">Everyone is already in this group.</p>
+              )}
+              {availableToAdd.map((p) => {
+                const checked = addMemberIds.includes(p._id);
+                return (
+                  <label key={p._id} className="flex items-center gap-2 text-sm text-gray-700 px-2 py-1.5 rounded hover:bg-gray-50">
+                    <input type="checkbox" checked={checked} onChange={() => toggleAddMemberId(p._id)} />
+                    <span>{p.name}</span>
+                    <span className="text-xs text-gray-400">{p.role}</span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="p-3 border-t border-gray-100 shrink-0">
+              <button
+                className="btn-primary w-full"
+                disabled={addingMembers || addMemberIds.length === 0}
+                onClick={submitAddMembers}
+              >
+                {addingMembers ? 'Adding...' : `Add ${addMemberIds.length || ''} Member${addMemberIds.length === 1 ? '' : 's'}`}
+              </button>
             </div>
           </div>
         </div>

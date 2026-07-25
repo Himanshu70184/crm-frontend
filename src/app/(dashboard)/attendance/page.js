@@ -203,8 +203,8 @@ export default function AttendancePage() {
   };
 
   const handleResetRange = () => {
-    setDatePreset('thisMonth');
-    setFilters({ ...getMonthRange(), user: '' });
+    setDatePreset('today');
+    setFilters({ ...DATE_PRESETS.today(), user: '' });
   };
 
   const canClockIn = !selfTodayRecord?.clockInAt;
@@ -430,12 +430,13 @@ export default function AttendancePage() {
                     return (
                       <div key={record._id} className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-surface-200 bg-surface-50 px-4 py-3">
                         <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-violet-600 text-white flex items-center justify-center font-semibold text-sm flex-shrink-0">
+                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-violet-600 text-white flex items-center justify-center font-semibold text-sm flex-shrink-0"
+                           style={{ background: `linear-gradient(135deg, var(--brand-primary), var(--brand-accent))` }}>
                             {getInitials(record.user?.name || 'A')}
                           </div>
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-medium text-surface-900 truncate">{record.user?.name}</p>
+                              <p className="font-medium text-surface-900 truncate" >{record.user?.name}</p>
                               <span className={`badge ${ROLE_COLORS[record.user?.role] || ROLE_COLORS.team_member}`}>{record.user?.role}</span>
                               <span className={`badge ${status.className}`}>{status.label}</span>
                               {record.isLate && <span className="badge bg-amber-100 text-amber-700">Late {record.lateMinutes ? `(${formatMinutesAsHours(record.lateMinutes)})` : ''}</span>}

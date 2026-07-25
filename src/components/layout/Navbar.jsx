@@ -71,7 +71,8 @@ export default function Navbar() {
             onClick={() => setShowUserMenu(!showUserMenu)}
             className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl hover:bg-surface-100 transition-colors border border-transparent hover:border-surface-200"
           >
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-violet-600 flex items-center justify-center text-white text-xs font-bold">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-violet-600 flex items-center justify-center text-white text-xs font-bold"
+            style={{ background: `linear-gradient(135deg, var(--brand-primary), var(--brand-accent))` }}>
               {user?.name?.charAt(0).toUpperCase()}
             </div>
             <span className="text-sm font-medium text-surface-700 hidden sm:block">{user?.name}</span>
