@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { tasksAPI, projectsAPI, settingsAPI } from '@/lib/api';
 import { fetchAssignableUsers } from '@/lib/assignableUsers';
-import { DEFAULT_COLUMNS } from '@/lib/kanban';
+import { DEFAULT_COLUMNS, getProjectColumns } from '@/lib/kanban';
 import toast from 'react-hot-toast';
 
 export default function AddTaskModal({ open, onClose, onCreated, defaultProjectId = '' }) {
@@ -26,9 +26,37 @@ export default function AddTaskModal({ open, onClose, onCreated, defaultProjectI
   useEffect(() => {
     if (!open) return;
     projectsAPI.getAll({ limit: 100 }).then((res) => setProjects(res.data.projects || [])).catch(() => {});
-    settingsAPI.getKanbanColumns().then((res) => setColumns(res.data.columns)).catch(() => {});
+    settingsAPI.getKanbanColumns()
+      .then((res) => setColumns(res.data.columns || DEFAULT_COLUMNS))
+      .catch(() => setColumns(DEFAULT_COLUMNS));
     setForm((f) => ({ ...f, project: defaultProjectId || f.project }));
   }, [open, defaultProjectId]);
+
+  useEffect(() => {
+    if (!form.project) {
+      setColumns(DEFAULT_COLUMNS);
+      setForm((prev) => ({ ...prev, status: DEFAULT_COLUMNS[0]?.id || 'todo' }));
+      return;
+    }
+
+    Promise.all([
+      projectsAPI.getOne(form.project),
+      settingsAPI.getKanbanColumns().catch(() => ({ data: { columns: DEFAULT_COLUMNS } })),
+    ])
+      .then(([pRes, sRes]) => {
+        const fallbackColumns = sRes?.data?.columns || DEFAULT_COLUMNS;
+        const nextColumns = getProjectColumns(pRes.data.project, fallbackColumns);
+        setColumns(nextColumns);
+        setForm((prev) => {
+          const hasStatus = nextColumns.some((c) => c.id === prev.status);
+          return { ...prev, status: hasStatus ? prev.status : (nextColumns[0]?.id || 'todo') };
+        });
+      })
+      .catch(() => {
+        setColumns(DEFAULT_COLUMNS);
+        setForm((prev) => ({ ...prev, status: DEFAULT_COLUMNS[0]?.id || 'todo' }));
+      });
+  }, [form.project]);
 
   useEffect(() => {
     if (!form.project) {

@@ -5,7 +5,14 @@ import { settingsAPI } from '@/lib/api';
 import { COLOR_OPTIONS, slugifyColumnId } from '@/lib/kanban';
 import toast from 'react-hot-toast';
 
-export default function KanbanPhasesModal({ open, onClose, columns, onSaved }) {
+export default function KanbanPhasesModal({
+  open,
+  onClose,
+  columns,
+  onSaved,
+  savePhases,
+  successMessage = 'Kanban phases updated',
+}) {
   const [draft, setDraft] = useState([]);
   const [saving, setSaving] = useState(false);
 
@@ -54,9 +61,12 @@ export default function KanbanPhasesModal({ open, onClose, columns, onSaved }) {
 
     setSaving(true);
     try {
-      const res = await settingsAPI.updateKanbanColumns(normalized);
-      toast.success('Kanban phases updated');
-      onSaved(res.data.columns);
+      const res = savePhases
+        ? await savePhases(normalized)
+        : await settingsAPI.updateKanbanColumns(normalized);
+      const nextColumns = res?.data?.columns || normalized;
+      toast.success(successMessage);
+      onSaved(nextColumns);
       onClose();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to save phases');

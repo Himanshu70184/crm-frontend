@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { tasksAPI, projectsAPI, settingsAPI } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import { DEFAULT_COLUMNS } from '@/lib/kanban';
+import { DEFAULT_COLUMNS, getProjectColumns } from '@/lib/kanban';
 import KanbanBoard from '@/components/kanban/KanbanBoard';
 import KanbanPhasesModal from '@/components/kanban/KanbanPhasesModal';
 import toast from 'react-hot-toast';
@@ -30,9 +30,10 @@ export default function KanbanPage() {
       settingsAPI.getKanbanColumns(),
     ])
       .then(([pRes, tRes, cRes]) => {
-        setProject(pRes.data.project);
+        const nextProject = pRes.data.project;
+        setProject(nextProject);
         setTasks(tRes.data.tasks);
-        setColumns(cRes.data.columns);
+        setColumns(getProjectColumns(nextProject, cRes.data.columns || DEFAULT_COLUMNS));
       })
       .catch(() => toast.error('Failed to load Kanban'))
       .finally(() => setLoading(false));
@@ -110,6 +111,8 @@ export default function KanbanPage() {
         open={showPhases}
         onClose={() => setShowPhases(false)}
         columns={columns}
+        savePhases={(nextColumns) => projectsAPI.updateKanban(projectId, { columns: nextColumns })}
+        successMessage="Project phases updated"
         onSaved={(cols) => {
           setColumns(cols);
           load();

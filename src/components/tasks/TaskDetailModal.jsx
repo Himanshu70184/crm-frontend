@@ -5,6 +5,7 @@ import {
   tasksAPI,
   commentsAPI,
   timeLogsAPI,
+  projectsAPI,
   settingsAPI,
 } from '@/lib/api';
 import { fetchAssignableUsers } from '@/lib/assignableUsers';
@@ -14,7 +15,7 @@ import {
   PRIORITY_COLORS,
   getInitials,
 } from '@/lib/utils';
-import { DEFAULT_COLUMNS } from '@/lib/kanban';
+import { DEFAULT_COLUMNS, getProjectColumns } from '@/lib/kanban';
 import { useAuth } from '@/context/AuthContext';
 import { useOrganizationSettings } from '@/context/OrganizationSettingsContext';
 import TaskTimer from '@/components/tasks/TaskTimer';
@@ -419,6 +420,17 @@ export default function TaskDetailModal({
       } else {
         fetchAssignableUsers().then(setTeam).catch(() => setTeam([]));
       }
+
+      try {
+        const [projectRes, settingsRes] = await Promise.all([
+          pid ? projectsAPI.getOne(pid) : Promise.resolve({ data: { project: null } }),
+          settingsAPI.getKanbanColumns(),
+        ]);
+        const fallbackColumns = settingsRes?.data?.columns || DEFAULT_COLUMNS;
+        setStatusOptions(getProjectColumns(projectRes?.data?.project, fallbackColumns));
+      } catch {
+        setStatusOptions(DEFAULT_COLUMNS);
+      }
     } catch {
       toast.error('Failed to load task');
       onClose?.();
@@ -434,10 +446,6 @@ export default function TaskDetailModal({
   useEffect(() => {
     if (open && activityKey > 0) refreshFeed();
   }, [activityKey, open, refreshFeed]);
-
-  useEffect(() => {
-    settingsAPI.getKanbanColumns().then((res) => setStatusOptions(res.data.columns)).catch(() => {});
-  }, []);
 
   useEffect(() => {
     if (!open) return undefined;

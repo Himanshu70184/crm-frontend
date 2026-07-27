@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { tasksAPI, projectsAPI, settingsAPI } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import { DEFAULT_COLUMNS } from '@/lib/kanban';
+import { DEFAULT_COLUMNS, getProjectColumns } from '@/lib/kanban';
 import PageHeader from '@/components/ui/PageHeader';
 import KanbanBoard from '@/components/kanban/KanbanBoard';
 import KanbanPhasesModal from '@/components/kanban/KanbanPhasesModal';
@@ -26,11 +26,24 @@ export default function TasksPage() {
   const [filters, setFilters] = useState({ priority: '', project: '', search: '' });
 
   const loadColumns = useCallback(() => {
-    settingsAPI
-      .getKanbanColumns()
-      .then((res) => setColumns(res.data.columns))
+    if (!filters.project) {
+      settingsAPI
+        .getKanbanColumns()
+        .then((res) => setColumns(res.data.columns || DEFAULT_COLUMNS))
+        .catch(() => setColumns(DEFAULT_COLUMNS));
+      return;
+    }
+
+    Promise.all([
+      projectsAPI.getOne(filters.project),
+      settingsAPI.getKanbanColumns().catch(() => ({ data: { columns: DEFAULT_COLUMNS } })),
+    ])
+      .then(([pRes, sRes]) => {
+        const fallbackColumns = sRes?.data?.columns || DEFAULT_COLUMNS;
+        setColumns(getProjectColumns(pRes.data.project, fallbackColumns));
+      })
       .catch(() => setColumns(DEFAULT_COLUMNS));
-  }, []);
+  }, [filters.project]);
 
   const loadTasks = useCallback(() => {
     setLoading(true);
@@ -74,6 +87,8 @@ export default function TasksPage() {
     }
   };
 
+  const selectedProjectName = projects.find((p) => p._id === filters.project)?.name || '';
+
   return (
     <div className="-m-6 flex flex-col h-[calc(100vh-4rem)] min-h-0">
       <div className="px-6 pt-6 pb-4 flex-shrink-0 space-y-4 bg-surface-50 border-b border-surface-200">
@@ -89,7 +104,13 @@ export default function TasksPage() {
                 </button>
               )}
               {canManagePhases && (
-                <button type="button" onClick={() => setShowPhases(true)} className="btn-secondary text-sm">
+                <button
+                  type="button"
+                  onClick={() => setShowPhases(true)}
+                  className="btn-secondary text-sm"
+                  disabled={!filters.project}
+                  title={filters.project ? 'Manage phases for selected project' : 'Select a project to manage its phases'}
+                >
                   Manage phases
                 </button>
               )}
@@ -127,6 +148,12 @@ export default function TasksPage() {
           </select>
           <span className="text-xs text-surface-400 ml-auto hidden sm:inline">Scroll horizontally for more phases →</span>
         </div>
+
+        {filters.project && (
+          <p className="text-xs text-surface-500">
+            Managing phases for: <span className="font-semibold text-surface-700">{selectedProjectName || 'Selected project'}</span>
+          </p>
+        )}
       </div>
 
       {/*
@@ -168,6 +195,8 @@ export default function TasksPage() {
         open={showPhases}
         onClose={() => setShowPhases(false)}
         columns={columns}
+        savePhases={(nextColumns) => projectsAPI.updateKanban(filters.project, { columns: nextColumns })}
+        successMessage="Project phases updated"
         onSaved={(cols) => {
           setColumns(cols);
           loadTasks();

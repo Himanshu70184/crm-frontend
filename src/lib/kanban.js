@@ -45,3 +45,8 @@ export function getStatusMeta(columns, statusId) {
   if (!col) return { label: statusId, color: COLUMN_COLORS.slate.badge };
   return { label: col.label, color: getColumnStyle(col.color).badge };
 }
+
+export function getProjectColumns(project, fallback = DEFAULT_COLUMNS) {
+  const cols = project?.kanbanConfig?.columns;
+  return Array.isArray(cols) && cols.length ? cols : fallback;
+}
