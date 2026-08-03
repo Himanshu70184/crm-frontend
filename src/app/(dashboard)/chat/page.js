@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { chatAPI, usersAPI, getAssetUrl } from '@/lib/api';
+import { getChatSocket, disconnectChatSocket } from '@/lib/socket';
 import { useAuth } from '@/context/AuthContext';
 import usePermission from '@/hooks/usePermission';
 import toast from 'react-hot-toast';
@@ -174,6 +175,10 @@ export default function ChatPage() {
   const messageInputRef = useRef(null);
   const activeConversationIdRef = useRef('');
   const fileInputRef = useRef(null);
+  const socketRef = useRef(null);
+  const joinedConversationIdRef = useRef('');
+  const refreshConversationsRef = useRef(null);
+  const loadMessagesRef = useRef(null);
 
   const [pendingFiles, setPendingFiles] = useState([]); // [{ file, previewUrl, kind }]
   const [uploading, setUploading] = useState(false);
@@ -474,6 +479,14 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
+    refreshConversationsRef.current = refreshConversations;
+  }, [refreshConversations]);
+
+  useEffect(() => {
+    loadMessagesRef.current = loadMessages;
+  }, [loadMessages]);
+
+  useEffect(() => {
     if (!canRead) return;
     let mounted = true;
     const init = async () => {
@@ -492,21 +505,89 @@ export default function ChatPage() {
     };
     init();
 
-    // Lightweight polling to keep chat updated without websocket setup.
+    // Fallback polling only when socket is disconnected.
     const timer = setInterval(async () => {
+      if (socketRef.current?.connected) return;
       try {
         await refreshConversations();
         if (activeConversationIdRef.current) await loadMessages(activeConversationIdRef.current);
       } catch (_) {
         // silent polling failure
       }
-    }, 8000);
+    }, 20000);
 
     return () => {
       mounted = false;
       clearInterval(timer);
     };
   }, [canRead, canCreate, user?._id]);
+
+  useEffect(() => {
+    if (!canRead || !user?._id) return;
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('crm_token') : '';
+    if (!token) return;
+
+    const socket = getChatSocket(token);
+    if (!socket) return;
+    socketRef.current = socket;
+
+    const handleConversationUpdated = async (payload = {}) => {
+      try {
+        if (refreshConversationsRef.current) {
+          await refreshConversationsRef.current();
+        }
+        const activeId = activeConversationIdRef.current;
+        if (!activeId || !loadMessagesRef.current) return;
+        if (!payload.conversationId || payload.conversationId === activeId) {
+          await loadMessagesRef.current(activeId);
+        }
+      } catch {
+        // silent realtime refresh failure
+      }
+    };
+
+    const handleMessageMutation = async (payload = {}) => {
+      try {
+        if (refreshConversationsRef.current) {
+          await refreshConversationsRef.current();
+        }
+        const activeId = activeConversationIdRef.current;
+        if (!activeId || !loadMessagesRef.current) return;
+        if (!payload.conversationId || payload.conversationId === activeId) {
+          await loadMessagesRef.current(activeId);
+        }
+      } catch {
+        // silent realtime refresh failure
+      }
+    };
+
+    const handleConnect = () => {
+      const activeId = activeConversationIdRef.current;
+      if (activeId) {
+        socket.emit('chat:join', { conversationId: activeId });
+      }
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('chat:conversation-updated', handleConversationUpdated);
+    socket.on('chat:message-created', handleMessageMutation);
+    socket.on('chat:message-updated', handleMessageMutation);
+    socket.on('chat:message-deleted', handleMessageMutation);
+    socket.on('chat:pin-updated', handleMessageMutation);
+
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('chat:conversation-updated', handleConversationUpdated);
+      socket.off('chat:message-created', handleMessageMutation);
+      socket.off('chat:message-updated', handleMessageMutation);
+      socket.off('chat:message-deleted', handleMessageMutation);
+      socket.off('chat:pin-updated', handleMessageMutation);
+      disconnectChatSocket();
+      socketRef.current = null;
+      joinedConversationIdRef.current = '';
+    };
+  }, [canRead, user?._id]);
 
   // Clean up all pending delete timers when the component unmounts
   useEffect(() => {
@@ -529,6 +610,18 @@ export default function ChatPage() {
     prevMessageCountRef.current = 0;
     setUnreadCount(0);
     setNearBottom(true);
+    if (socketRef.current?.connected) {
+      if (
+        joinedConversationIdRef.current &&
+        joinedConversationIdRef.current !== activeConversationId
+      ) {
+        socketRef.current.emit('chat:leave', {
+          conversationId: joinedConversationIdRef.current,
+        });
+      }
+      socketRef.current.emit('chat:join', { conversationId: activeConversationId });
+      joinedConversationIdRef.current = activeConversationId;
+    }
     // For group chats, load the pinned message from the conversation data
     // (persistent on server). For direct chats, reset to null (self-scope).
     const conv = conversations.find((c) => c._id === activeConversationId);
