@@ -204,6 +204,7 @@ export const chatAPI = {
     api.put(`/chat/conversations/${conversationId}/admins/${userId}`, { isAdmin }),
   leaveConversation: (conversationId) => api.post(`/chat/conversations/${conversationId}/leave`),
   getMessages: (conversationId, params) => api.get(`/chat/conversations/${conversationId}/messages`, { params }),
+  getMessageCount: (conversationId) => api.get(`/chat/conversations/${conversationId}/messages/count`),
   sendMessage: (conversationId, data) => {
     // When data is FormData (attachments present), delete the Content-Type
     // header so the browser sets 'multipart/form-data; boundary=...' itself.
