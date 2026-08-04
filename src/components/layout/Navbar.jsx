@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { useOrganizationSettings } from '@/context/OrganizationSettingsContext';
 import { notificationsAPI } from '@/lib/api';
+import { getChatSocket } from '@/lib/socket';
 import { IconBell } from '@/components/ui/Icons';
 
 const routeTitles = {
@@ -35,6 +36,28 @@ export default function Navbar() {
       .then((res) => setUnread(res.data.unreadCount))
       .catch(() => {});
   }, [pathname]);
+
+  useEffect(() => {
+    if (!showNotifications) return;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('crm_token') : '';
+    if (!token) return;
+
+    const socket = getChatSocket(token);
+    if (!socket) return;
+
+    const handleNotificationCreated = (payload = {}) => {
+      if (payload.unreadCount != null) {
+        setUnread(payload.unreadCount);
+      } else {
+        setUnread((prev) => prev + 1);
+      }
+    };
+
+    socket.on('notification:created', handleNotificationCreated);
+    return () => {
+      socket.off('notification:created', handleNotificationCreated);
+    };
+  }, [showNotifications]);
 
   const title = Object.entries(routeTitles).find(([k]) => pathname === k || pathname.startsWith(k + '/'))?.[1] || 'CRM Pro';
 

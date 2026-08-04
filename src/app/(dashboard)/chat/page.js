@@ -22,6 +22,38 @@ function formatTime(v) {
   return new Date(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Truncates a message preview to the first `maxWords` words, appending an
+// ellipsis ("…") when the text is longer. Used for the sidebar preview line.
+function truncatePreview(text, maxWords = 3) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  const words = clean.split(' ');
+  if (words.length <= maxWords) return clean;
+  return `${words.slice(0, maxWords).join(' ')}…`;
+}
+
+// Builds the last-message preview string shown beneath the conversation title
+// in the sidebar. For direct/self chats it's just the message text; for group
+// chats it's prefixed with the sender's name. Attachment-only messages are
+// shown as a paperclip indicator.
+function lastMessagePreview(c, currentUserName) {
+  const lm = c?.lastMessage;
+  if (!lm) return c?.lastMessageAt ? 'Message' : 'No messages yet';
+  const body = truncatePreview(lm.body);
+  const hasAttachments = Array.isArray(lm.attachments) && lm.attachments.length > 0;
+  const text = body || (hasAttachments ? '📎 Attachment' : '');
+  if (!text) return 'No messages yet';
+  // Show 'You' when the last message sender is the current user.
+  if (lm.senderName && currentUserName && lm.senderName === currentUserName) {
+    return `You: ${text}`;
+  }
+  // For group chats, prefix with sender name when it's not you.
+  if (c?.type === 'group' && lm.senderName) {
+    return `${lm.senderName}: ${text}`;
+  }
+  return text;
+}
+
 function dateKey(v) {
   const d = new Date(v);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -69,12 +101,33 @@ function formatBytes(bytes) {
 
 const URL_REGEX = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,:;"')\]])/gi;
 
-// Strips @mention patterns (like @admin.user, @super.admin) from text
-// so they don't appear duplicated in the message body — only in the "Mentioned:" section.
-function stripMentions(text) {
+// Escape text for use inside a RegExp pattern.
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const mentionHandleFor = (name) => String(name || '').trim().toLowerCase().replace(/\s+/g, '.');
+
+// Strips @mention patterns from text so they don't appear duplicated in the
+// message body — only in the "Mentioned:" section.
+// If `mentions` are provided, only remove the exact mention handles from the
+// message body, rather than removing all @words.
+function stripMentions(text, mentions = []) {
   if (!text) return text;
-  // Remove @handle patterns (word characters, dots, hyphens, underscores after @)
-  return text.replace(/@[a-z0-9._-]+/gi, '').replace(/\s{2,}/g, ' ').trim();
+  let result = String(text);
+
+  if (mentions.length > 0) {
+    mentions.forEach((mention) => {
+      const handle = mentionHandleFor(mention.name);
+      if (!handle) return;
+      const regex = new RegExp(`@${escapeRegExp(handle)}\\b`, 'gi');
+      result = result.replace(regex, '');
+    });
+  } else {
+    result = result.replace(/@[a-z0-9._-]+/gi, '');
+  }
+
+  return result.replace(/\s{2,}/g, ' ').trim();
 }
 
 // Splits message text around URLs, rendering plain text as-is and URLs as
@@ -230,6 +283,7 @@ export default function ChatPage() {
   const [forwardNewChatTitle, setForwardNewChatTitle] = useState('');
   const [forwardNewChatUserIds, setForwardNewChatUserIds] = useState([]);
   const [forwardMentionUserIds, setForwardMentionUserIds] = useState([]);
+  const [forwardNote, setForwardNote] = useState('');
   const [forwarding, setForwarding] = useState(false);
 
   const messageGroups = useMemo(() => groupMessagesByDate(messages), [messages]);
@@ -298,6 +352,17 @@ export default function ChatPage() {
     });
   }, [conversations, search]);
 
+  // Ensure the conversation lists rendered in the sidebar are deduplicated
+  // by `_id` to avoid React key collisions when the same conversation
+  // appears more than once in the source arrays.
+  const uniqueFilteredConversations = useMemo(() => {
+    const map = new Map();
+    (filteredConversations || []).forEach((c) => {
+      if (c && c._id) map.set(String(c._id), c);
+    });
+    return Array.from(map.values());
+  }, [filteredConversations]);
+
   // Conversation list shown inside the Forward modal, filtered by its own search box.
   const forwardableConversations = useMemo(() => {
     const q = forwardSearch.trim().toLowerCase();
@@ -308,6 +373,14 @@ export default function ChatPage() {
       return title.includes(q) || names.includes(q);
     });
   }, [conversations, forwardSearch]);
+
+  const uniqueForwardableConversations = useMemo(() => {
+    const map = new Map();
+    (forwardableConversations || []).forEach((c) => {
+      if (c && c._id) map.set(String(c._id), c);
+    });
+    return Array.from(map.values());
+  }, [forwardableConversations]);
 
   // People eligible to be @mentioned in the forward — the union of members
   // across every currently selected target (existing chats + the new-chat
@@ -349,7 +422,53 @@ export default function ChatPage() {
       const other = (c.participants || []).find((p) => p._id !== user?._id);
       if (other?.name) directChatNameCache.current[c._id] = other.name;
     });
-    setConversations(list);
+    // Preserve any current unread state across refreshes
+    setConversations((prev) => {
+      const map = new Map(prev.map((p) => [String(p._id), p]));
+      return list.map((c) => {
+        const existing = map.get(String(c._id));
+        // Compute local last-seen from localStorage so refresh shows unread
+        // state even across reloads/sessions on this browser.
+        const seenKey = `chat:seen:${c._id}`;
+        const seenVal = typeof window !== 'undefined' ? localStorage.getItem(seenKey) : null;
+        const seenTs = seenVal ? new Date(seenVal).getTime() : 0;
+        const lastMsgTs = c.lastMessageAt ? new Date(c.lastMessageAt).getTime() : 0;
+        const lastMsgFromSelf = c.lastMessage && user?.name && c.lastMessage.senderName === user.name;
+        const hasUnread = lastMsgTs > seenTs && !lastMsgFromSelf;
+        const unreadCount = hasUnread ? (existing?.unreadCount || 1) : 0;
+        return {
+          ...c,
+          unreadCount,
+          hasUnread,
+        };
+      });
+    });
+
+    // If some conversations have a `lastMessageAt` timestamp but no
+    // `lastMessage` object (possible when the backend couldn't resolve
+    // the message in the aggregation), fetch the latest message for a
+    // few of them so the sidebar preview can show the text.
+    (async () => {
+      try {
+        const need = list.filter((c) => c.lastMessageAt && !c.lastMessage).slice(0, 10);
+        await Promise.all(
+          need.map(async (c) => {
+            try {
+              const res = await chatAPI.getMessages(c._id, { limit: 1 });
+              const msgs = res.data.messages || [];
+              if (msgs.length) {
+                const m = msgs[msgs.length - 1];
+                patchConversationMeta(c._id, { lastMessageAt: m.createdAt || c.lastMessageAt, lastMessage: deriveLastMessage(m) });
+              }
+            } catch (e) {
+              // ignore per-conversation failures
+            }
+          })
+        );
+      } catch (e) {
+        // ignore
+      }
+    })();
     setActiveConversationId((prev) => {
       if (prev && list.some((c) => c._id === prev)) return prev;
       // list[0] is now guaranteed to be the most recently active
@@ -436,39 +555,107 @@ export default function ChatPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [openActionMenuId]);
 
-  const loadMessages = async (conversationId, { forceScroll = false } = {}) => {
+  const sortConversations = (list) => [...list].sort((a, b) => {
+    const aTime = new Date(a.lastMessageAt || a.updatedAt || a.createdAt).getTime();
+    const bTime = new Date(b.lastMessageAt || b.updatedAt || b.createdAt).getTime();
+    return bTime - aTime;
+  });
+
+const patchConversationMeta = (conversationId, patch = {}) => {
     if (!conversationId) return;
-    const res = await chatAPI.getMessages(conversationId, { limit: 100 });
-    // Force chronological (oldest → newest) order regardless of what the
-    // API returns. Many "recent messages" endpoints return newest-first for
-    // pagination purposes; if we render that raw order, the newest message
-    // ends up at the TOP of the list and the oldest at the BOTTOM — so
-    // "scroll to bottom" was correctly landing on the true last DOM item,
-    // which was actually the oldest fetched message, not the newest.
-    const newMessages = [...(res.data.messages || [])].sort(
-      (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
-    );
-    // Fall back to any message's embedded sender name to recover a departed
-    // participant's display name — this covers opening the conversation for
-    // the very first time in a session AFTER they've already left, when the
-    // live `participants` list never included them and refreshConversations'
-    // cache pass had nothing to snapshot.
-    const otherMsgSender = [...newMessages].reverse().find((m) => m.sender && m.sender._id !== user?._id)?.sender;
+    setConversations((prev) => {
+      const next = prev.map((conv) => (conv._id === conversationId ? { ...conv, ...patch } : conv));
+      if (patch.lastMessageAt || patch.updatedAt) {
+        // Recompute unread flag for the updated conversation when we get
+        // a new lastMessage or timestamp so the UI reflects whether it's
+        // unread for this user (compare to local last-seen and sender).
+        const updated = next.map((conv) => {
+          if (conv._id !== conversationId) return conv;
+          try {
+            const key = `chat:seen:${conv._id}`;
+            const seenVal = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
+            const seenTs = seenVal ? new Date(seenVal).getTime() : 0;
+            const lastMsgTs = conv.lastMessageAt ? new Date(conv.lastMessageAt).getTime() : 0;
+            const lastMsgFromSelf = conv.lastMessage && user?.name && conv.lastMessage.senderName === user.name;
+            const hasUnread = lastMsgTs > seenTs && !lastMsgFromSelf;
+            const unreadCount = hasUnread ? (conv.unreadCount || 1) : 0;
+            return { ...conv, hasUnread, unreadCount };
+          } catch (e) {
+            return conv;
+          }
+        });
+        return sortConversations(updated);
+      }
+      return next;
+    });
+  };
+
+  const incrementConversationUnread = (conversationId, inc = 1) => {
+    if (!conversationId) return;
+    setConversations((prev) => prev.map((conv) => {
+      if (conv._id !== conversationId) return conv;
+      const nextCount = (conv.unreadCount || 0) + inc;
+      return { ...conv, unreadCount: nextCount, hasUnread: nextCount > 0 };
+    }));
+    // do NOT update localStorage here; last-seen stays as before so refresh
+    // still indicates unread until user opens the convo.
+  };
+
+  const clearConversationUnread = (conversationId) => {
+    if (!conversationId) return;
+    setConversations((prev) => prev.map((conv) => (conv._id === conversationId ? { ...conv, unreadCount: 0, hasUnread: false } : conv)));
+    // persist last-seen timestamp to localStorage
+    try {
+      const key = `chat:seen:${conversationId}`;
+      localStorage.setItem(key, new Date().toISOString());
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  // Builds a lightweight `lastMessage` object from a ChatMessage so the
+  // sidebar preview can update instantly on realtime message events —
+  // without waiting for a full conversation-list refresh.
+  const deriveLastMessage = (message) => {
+    if (!message) return null;
+    return {
+      body: message.body || '',
+      attachments: message.attachments || [],
+      senderName: message.sender?.name || '',
+    };
+  };
+
+  const maybeUpdateDirectChatName = (conversationId, messagesList) => {
+    const otherMsgSender = [...messagesList].reverse().find((m) => m.sender && m.sender._id !== user?._id)?.sender;
     if (otherMsgSender?.name) {
       directChatNameCache.current[conversationId] = otherMsgSender.name;
     }
+  };
+
+  const loadMessages = async (conversationId, { forceScroll = false } = {}) => {
+    if (!conversationId) return;
+    const res = await chatAPI.getMessages(conversationId, { limit: 100 });
+    const newMessages = [...(res.data.messages || [])].sort(
+      (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+    );
+    maybeUpdateDirectChatName(conversationId, newMessages);
     const added = newMessages.length - prevMessageCountRef.current;
     setMessages(newMessages);
     prevMessageCountRef.current = newMessages.length;
 
+// Keep the sidebar preview in sync from the loaded messages so it works
+    // even if the backend conversation list doesn't include lastMessage yet.
+    const lastMsg = newMessages.length ? newMessages[newMessages.length - 1] : null;
+    if (lastMsg) {
+      patchConversationMeta(conversationId, { lastMessageAt: lastMsg.createdAt, lastMessage: deriveLastMessage(lastMsg) });
+      // When we load messages for a conversation, mark it as read locally.
+      clearConversationUnread(conversationId);
+    }
+
     if (forceScroll) {
-      // Opening a conversation for the first time — always land at the bottom.
       requestAnimationFrame(() => scrollToBottom('auto'));
       return;
     }
-    // Never yank the user's scroll position. If they're already sitting at
-    // the bottom, keep following new messages automatically. Otherwise,
-    // just bump the unread badge on the floating "jump to bottom" button.
     if (added > 0) {
       if (isNearBottomRef.current) {
         requestAnimationFrame(() => scrollToBottom('smooth'));
@@ -534,28 +721,98 @@ export default function ChatPage() {
 
     const handleConversationUpdated = async (payload = {}) => {
       try {
+        if (payload.conversationId && payload.lastMessageAt) {
+          patchConversationMeta(payload.conversationId, { lastMessageAt: payload.lastMessageAt });
+        }
         if (refreshConversationsRef.current) {
           await refreshConversationsRef.current();
-        }
-        const activeId = activeConversationIdRef.current;
-        if (!activeId || !loadMessagesRef.current) return;
-        if (!payload.conversationId || payload.conversationId === activeId) {
-          await loadMessagesRef.current(activeId);
         }
       } catch {
         // silent realtime refresh failure
       }
     };
 
-    const handleMessageMutation = async (payload = {}) => {
+    const upsertMessageInList = (message) => {
+      if (!message?._id) return;
+      setMessages((prev) => {
+        const exists = prev.some((m) => m._id === message._id);
+        const next = exists ? prev.map((m) => (m._id === message._id ? message : m)) : [...prev, message];
+        next.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        prevMessageCountRef.current = next.length;
+        return next;
+      });
+    };
+
+    const removeMessageFromList = (messageId) => {
+      if (!messageId) return;
+      setMessages((prev) => {
+        const next = prev.filter((m) => m._id !== messageId);
+        prevMessageCountRef.current = next.length;
+        return next;
+      });
+    };
+
+    const handleMessageCreated = (payload = {}) => {
       try {
-        if (refreshConversationsRef.current) {
-          await refreshConversationsRef.current();
-        }
         const activeId = activeConversationIdRef.current;
-        if (!activeId || !loadMessagesRef.current) return;
-        if (!payload.conversationId || payload.conversationId === activeId) {
-          await loadMessagesRef.current(activeId);
+        const { conversationId, message, lastMessageAt } = payload;
+        if (conversationId === activeId && message) {
+          upsertMessageInList(message);
+          maybeUpdateDirectChatName(conversationId, [message]);
+          if (isNearBottomRef.current) {
+            requestAnimationFrame(() => scrollToBottom('smooth'));
+          } else {
+            setUnreadCount((c) => c + 1);
+          }
+        }
+        if (conversationId && lastMessageAt) {
+          patchConversationMeta(conversationId, { lastMessageAt });
+        }
+        // Update the sidebar preview immediately for any conversation (active
+        // or not) so the last message shows without waiting for a refresh.
+        if (conversationId && message) {
+          patchConversationMeta(conversationId, { lastMessageAt: message.createdAt || new Date().toISOString(), lastMessage: deriveLastMessage(message) });
+          // Only mark as unread if the message was not sent by the current user.
+          const senderId = message.sender?._id || message.sender;
+          const amISender = senderId && user?._id && String(senderId) === String(user._id);
+          if (conversationId !== activeId && !amISender) {
+            incrementConversationUnread(conversationId, 1);
+          }
+        }
+      } catch {
+        // silent realtime refresh failure
+      }
+    };
+
+    const handleMessageUpdated = (payload = {}) => {
+      try {
+        const activeId = activeConversationIdRef.current;
+        const { conversationId, message } = payload;
+        if (conversationId === activeId && message) {
+          upsertMessageInList(message);
+        }
+      } catch {
+        // silent realtime refresh failure
+      }
+    };
+
+    const handleMessageDeleted = (payload = {}) => {
+      try {
+        const activeId = activeConversationIdRef.current;
+        const { conversationId, messageId } = payload;
+        if (conversationId === activeId && messageId) {
+          removeMessageFromList(messageId);
+        }
+      } catch {
+        // silent realtime refresh failure
+      }
+    };
+
+    const handlePinUpdated = (payload = {}) => {
+      try {
+        const { conversationId, pinnedMessageId } = payload;
+        if (conversationId === activeConversationIdRef.current) {
+          setPinnedMessageId(pinnedMessageId || null);
         }
       } catch {
         // silent realtime refresh failure
@@ -571,18 +828,18 @@ export default function ChatPage() {
 
     socket.on('connect', handleConnect);
     socket.on('chat:conversation-updated', handleConversationUpdated);
-    socket.on('chat:message-created', handleMessageMutation);
-    socket.on('chat:message-updated', handleMessageMutation);
-    socket.on('chat:message-deleted', handleMessageMutation);
-    socket.on('chat:pin-updated', handleMessageMutation);
+    socket.on('chat:message-created', handleMessageCreated);
+    socket.on('chat:message-updated', handleMessageUpdated);
+    socket.on('chat:message-deleted', handleMessageDeleted);
+    socket.on('chat:pin-updated', handlePinUpdated);
 
     return () => {
       socket.off('connect', handleConnect);
       socket.off('chat:conversation-updated', handleConversationUpdated);
-      socket.off('chat:message-created', handleMessageMutation);
-      socket.off('chat:message-updated', handleMessageMutation);
-      socket.off('chat:message-deleted', handleMessageMutation);
-      socket.off('chat:pin-updated', handleMessageMutation);
+      socket.off('chat:message-created', handleMessageCreated);
+      socket.off('chat:message-updated', handleMessageUpdated);
+      socket.off('chat:message-deleted', handleMessageDeleted);
+      socket.off('chat:pin-updated', handlePinUpdated);
       disconnectChatSocket();
       socketRef.current = null;
       joinedConversationIdRef.current = '';
@@ -607,6 +864,8 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!activeConversationId) return;
+    // Clear the unread indicator for the conversation the user opened
+    clearConversationUnread(activeConversationId);
     prevMessageCountRef.current = 0;
     setUnreadCount(0);
     setNearBottom(true);
@@ -897,9 +1156,15 @@ export default function ChatPage() {
       setNewMessage('');
       pendingFiles.forEach((pf) => pf.previewUrl && URL.revokeObjectURL(pf.previewUrl));
       setPendingFiles([]);
-      setMentionOpen(false);
+setMentionOpen(false);
       setReplyingTo(null);
       requestAnimationFrame(() => scrollToBottom('smooth'));
+      // Update the sidebar preview + timestamp immediately for the active chat
+      // so it reflects the just-sent message without waiting for a refresh.
+      patchConversationMeta(activeConversationId, {
+        lastMessageAt: res.data.message?.createdAt || new Date().toISOString(),
+        lastMessage: deriveLastMessage(res.data.message),
+      });
       await refreshConversations();
     } catch (err) {
       if (!err.response && pendingFiles.length > 0) {
@@ -1071,11 +1336,13 @@ export default function ChatPage() {
     setForwardNewChatTitle('');
     setForwardNewChatUserIds([]);
     setForwardMentionUserIds([]);
+    setForwardNote('');
   };
 
   const closeForward = () => {
     if (forwarding) return;
     setForwardingMessage(null);
+    setForwardNote('');
   };
 
   const toggleForwardTarget = (id) => {
@@ -1156,9 +1423,14 @@ export default function ChatPage() {
           );
           const mentionUsers = forwardMentionCandidates.filter((p) => validMentionIds.includes(p._id));
           const mentionPrefix = mentionUsers.map((p) => `@${mentionHandleFor(p.name)}`).join(' ');
-          const body = mentionPrefix
+          let body = mentionPrefix
             ? `${mentionPrefix} ${forwardingMessage.body || ''}`.trim()
             : (forwardingMessage.body || '');
+          const noteText = forwardNote.trim();
+          if (noteText) {
+            const noteSuffix = ` ${noteText}`;
+            body = body ? `${body}\n\n${noteSuffix}` : noteSuffix;
+          }
 
           if (files.length > 0) {
             const formData = new FormData();
@@ -1372,10 +1644,10 @@ export default function ChatPage() {
         )}
 
         <div className="flex-1 overflow-y-auto">
-          {filteredConversations.length === 0 && (
+          {uniqueFilteredConversations.length === 0 && (
             <p className="text-sm text-gray-400 p-4">No conversations found</p>
           )}
-          {filteredConversations.map((c) => {
+          {uniqueFilteredConversations.map((c, i) => {
             const active = c._id === activeConversationId;
             const isGroup = c.type === 'group';
             const others = (c.participants || []).filter((p) => p._id !== user?._id);
@@ -1383,25 +1655,31 @@ export default function ChatPage() {
             const otherLeft = !isGroup && others.length === 0;
             return (
               <button
-                key={c._id}
+                key={`${c._id}-${i}`}
                 className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-colors ${active ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
                 onClick={() => setActiveConversationId(c._id)}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="font-medium text-sm text-gray-900 truncate flex items-center gap-1.5 min-w-0">
+                  <div className={`font-medium text-sm text-gray-900 truncate flex items-center gap-1.5 min-w-0 ${c.hasUnread ? 'font-semibold' : ''}`}>
                     <span className="truncate">{title}</span>
                     {otherLeft && <span className="text-[10px] font-normal text-gray-400 shrink-0">(left)</span>}
                   </div>
-                  <span className="text-[11px] text-gray-400 shrink-0">{formatTime(c.lastMessageAt || c.updatedAt)}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {c.unreadCount > 0 && (
+                      <span className="inline-flex items-center justify-center px-2 py-0.5 min-w-[20px] h-5 text-[11px] font-semibold text-white rounded-full bg-[var(--brand-primary)]" title={`${c.unreadCount} unread`}>
+                        {c.unreadCount > 99 ? '99+' : c.unreadCount}
+                      </span>
+                    )}
+                    <span className="text-[11px] text-gray-400">{formatSidebarTimestamp(c.lastMessageAt || c.updatedAt)}</span>
+                  </div>
                 </div>
-                {isGroup && (
-                  <>
-                    <div className="text-xs text-gray-500 truncate mt-0.5">
-                      {others.map((p) => p.name).join(', ') || 'Only you'}
+                {/* Last-message preview — shown for every conversation type */}
+                    <div className="text-xs text-gray-500 truncate mt-0.5" title={c.lastMessage?.body || ''}>
+                      {lastMessagePreview(c, user?.name)}
                     </div>
-                    <div className="text-[11px] text-gray-400 mt-1">{(c.participants || []).length} member(s)</div>
-                  </>
-                )}
+                {/* {isGroup && (
+                  <div className="text-[11px] text-gray-400 mt-1">{(c.participants || []).length} member(s)</div>
+                )} */}
               </button>
             );
           })}
@@ -1866,7 +2144,6 @@ export default function ChatPage() {
                                     <span><span className="font-semibold text-sm">@everyone</span></span>
                                   ) : (
                                     <>
-                                      {/* <span className="mr-1">Mentioned:</span> */}
                                       {m.mentions.map((x, i) => (
                                         <span key={x._id || i}>
                                           {i > 0 && <span className="mx-1">·</span>}
@@ -1889,7 +2166,7 @@ export default function ChatPage() {
                               )}
                               {!!m.body && (
                                 <p className="text-sm whitespace-pre-wrap break-words">
-                                  {linkifyMessage(stripMentions(m.body), mine, copyLink)}
+                                  {linkifyMessage(stripMentions(m.body, m.mentions), mine, copyLink)}
                                 </p>
                               )}
                              
@@ -2017,7 +2294,7 @@ export default function ChatPage() {
                   </>
                 )}
                 <div className="relative flex-1">
-              <input
+              <textarea
                 ref={messageInputRef}
                 className="input"
                 placeholder={canCreate ? 'Type a message... Use @name to mention' : 'You do not have send permission'}
@@ -2251,6 +2528,11 @@ export default function ChatPage() {
                 <p className="text-xs text-gray-400 truncate max-w-[280px]">
                   {forwardingMessage.body || (forwardingMessage.attachments?.length ? '📎 Attachment' : '')}
                 </p>
+                {forwardNote.trim() && (
+                  <p className="text-xs text-gray-500 mt-1 truncate max-w-[280px]">
+                    <span className="font-semibold">Note:</span> {forwardNote.trim()}
+                  </p>
+                )}
               </div>
               <button type="button" className="text-gray-400 hover:text-gray-700" onClick={closeForward}>
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2286,15 +2568,15 @@ export default function ChatPage() {
                     onChange={(e) => setForwardSearch(e.target.value)}
                   />
                   <div className="space-y-1">
-                    {forwardableConversations.length === 0 && (
+                    {uniqueForwardableConversations.length === 0 && (
                       <p className="text-sm text-gray-400 p-2">No conversations found</p>
                     )}
-                    {forwardableConversations.map((c) => {
+                    {uniqueForwardableConversations.map((c, i) => {
                       const title = getConversationTitle(c);
                       const checked = forwardTargetIds.includes(c._id);
                       return (
                         <label
-                          key={c._id}
+                          key={`${c._id}-${i}`}
                           className={`flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer ${checked ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
                         >
                           <input type="checkbox" checked={checked} onChange={() => toggleForwardTarget(c._id)} />
@@ -2369,6 +2651,17 @@ export default function ChatPage() {
               </div>
             )}
 
+            <div className="px-3 pt-3 pb-2 border-t border-gray-100 shrink-0">
+              <label className="block text-xs font-medium text-gray-600 mb-2">Add an optional note</label>
+              <textarea
+                rows={3}
+                className="textarea w-full resize-none px-2.5 py-2"
+                placeholder="Write why you're forwarding this (optional)"
+                value={forwardNote}
+                onChange={(e) => setForwardNote(e.target.value)}
+              />
+            </div>
+
             <div className="p-3 border-t border-gray-100 shrink-0">
               <button className="btn-primary w-full" disabled={forwarding} onClick={submitForward}>
                 {forwarding ? 'Forwarding...' : 'Forward'}
@@ -2412,4 +2705,16 @@ export default function ChatPage() {
       )}
     </div>
   );
+}
+
+function formatSidebarTimestamp(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (dateKey(d) === dateKey(today)) return formatTime(v);
+  if (dateKey(d) === dateKey(yesterday)) return 'Yesterday';
+  const sameYear = d.getFullYear() === today.getFullYear();
+  return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: sameYear ? undefined : 'numeric' });
 }

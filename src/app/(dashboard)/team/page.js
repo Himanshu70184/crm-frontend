@@ -243,6 +243,8 @@ function UserModal({ user: editUser, shiftOptions, departmentOptions, onClose, o
               <option value="manager">Manager</option>
               <option value="team_lead">Team Lead</option>
               <option value="team_member">Team Member</option>
+
+
             </select>
           </div>
           <div>
