@@ -52,12 +52,21 @@ api.interceptors.response.use(
   }
 );
 
+const isFormData = (data) => typeof FormData !== 'undefined' && data instanceof FormData;
+
+const sendData = (method, url, data) => {
+  if (isFormData(data)) {
+    return api[method](url, data, { headers: { 'Content-Type': undefined } });
+  }
+  return api[method](url, data);
+};
+
 // ─── Auth ───────────────────────────────────────────
 export const authAPI = {
   register: (data) => api.post('/auth/register', data),
   login: (data) => api.post('/auth/login', data),
   getMe: () => api.get('/auth/me'),
-  updateProfile: (data) => api.put('/auth/updateprofile', data),
+  updateProfile: (data) => sendData('put', '/auth/updateprofile', data),
   changePassword: (data) => api.put('/auth/changepassword', data),
 };
 
@@ -65,8 +74,8 @@ export const authAPI = {
 export const usersAPI = {
   getAll: (params) => api.get('/users', { params }),
   getOne: (id) => api.get(`/users/${id}`),
-  create: (data) => api.post('/users', data),
-  update: (id, data) => api.put(`/users/${id}`, data),
+  create: (data) => sendData('post', '/users', data),
+  update: (id, data) => sendData('put', `/users/${id}`, data),
   remove: (id) => api.delete(`/users/${id}`),
 };
 
@@ -191,7 +200,8 @@ export const rolesAPI = {
 // ─── Chat ────────────────────────────────────────────────────────────────────
 export const chatAPI = {
   getConversations: (params) => api.get('/chat/conversations', { params }),
-  createConversation: (data) => api.post('/chat/conversations', data),
+  createConversation: (data) => sendData('post', '/chat/conversations', data),
+  updateConversation: (conversationId, data) => sendData('put', `/chat/conversations/${conversationId}`, data),
   getConversationMembers: (conversationId) => api.get(`/chat/conversations/${conversationId}/members`),
   // NEW — add one or more users to an existing group. Only group admins may call this.
   addMembers: (conversationId, participantIds) =>
@@ -204,7 +214,7 @@ export const chatAPI = {
     api.put(`/chat/conversations/${conversationId}/admins/${userId}`, { isAdmin }),
   leaveConversation: (conversationId) => api.post(`/chat/conversations/${conversationId}/leave`),
   getMessages: (conversationId, params) => api.get(`/chat/conversations/${conversationId}/messages`, { params }),
-  getMessageCount: (conversationId) => api.get(`/chat/conversations/${conversationId}/messages/count`),
+  getMessageCount: (conversationId, params) => api.get(`/chat/conversations/${conversationId}/messages/count`, { params }),
   sendMessage: (conversationId, data) => {
     // When data is FormData (attachments present), delete the Content-Type
     // header so the browser sets 'multipart/form-data; boundary=...' itself.

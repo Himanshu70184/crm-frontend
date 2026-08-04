@@ -44,12 +44,18 @@ export default function SettingsPage() {
   const [emailStatus, setEmailStatus] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const [profile, setProfile] = useState({ name: '', phone: '', department: '' });
+  const [profile, setProfile] = useState({ name: '', phone: '', department: '', avatar: '', avatarFile: null });
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [testEmailTo, setTestEmailTo] = useState('');
 
   useEffect(() => {
-    setProfile({ name: user?.name || '', phone: user?.phone || '', department: user?.department || '' });
+    setProfile({
+      name: user?.name || '',
+      phone: user?.phone || '',
+      department: user?.department || '',
+      avatar: user?.avatar || '',
+      avatarFile: null,
+    });
     setTestEmailTo(user?.email || '');
   }, [user]);
 
@@ -146,7 +152,16 @@ export default function SettingsPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await authAPI.updateProfile(profile);
+      let payload = { name: profile.name, phone: profile.phone, department: profile.department };
+      if (profile.avatarFile) {
+        const formData = new FormData();
+        formData.append('name', profile.name);
+        formData.append('phone', profile.phone);
+        formData.append('department', profile.department);
+        formData.append('avatar', profile.avatarFile);
+        payload = formData;
+      }
+      const res = await authAPI.updateProfile(payload);
       updateUser(res.data.user);
       toast.success('Profile updated!');
     } catch (err) {
@@ -228,10 +243,19 @@ export default function SettingsPage() {
         <div className="card p-6">
           <div className="flex items-center gap-4 mb-6">
             <div
-              className="w-16 h-16 rounded-2xl text-white text-2xl flex items-center justify-center font-bold"
-              style={{ backgroundColor: 'var(--brand-primary)' }}
+              className="w-16 h-16 rounded-2xl overflow-hidden bg-slate-100 border border-slate-200"
             >
-              {user?.name?.charAt(0).toUpperCase()}
+              {profile.avatar || user?.avatar ? (
+                <img
+                  src={profile.avatar || user?.avatar}
+                  alt={user?.name}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-white text-2xl font-bold" style={{ backgroundColor: 'var(--brand-primary)' }}>
+                  {user?.name?.charAt(0).toUpperCase()}
+                </div>
+              )}
             </div>
             <div>
               <h3 className="font-semibold text-surface-900">{user?.name}</h3>
@@ -240,6 +264,15 @@ export default function SettingsPage() {
             </div>
           </div>
           <form onSubmit={handleProfileSave} className="space-y-4">
+            <div>
+              <label className="label">Profile Image</label>
+              <input
+                className="input"
+                type="file"
+                accept="image/*"
+                onChange={(e) => setProfile({ ...profile, avatarFile: e.target.files?.[0] })}
+              />
+            </div>
             <div>
               <label className="label">Full Name</label>
               <input className="input" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />

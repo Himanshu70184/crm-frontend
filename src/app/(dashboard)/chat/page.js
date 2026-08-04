@@ -200,6 +200,9 @@ export default function ChatPage() {
   const [showMembers, setShowMembers] = useState(false);
   const [newChatTitle, setNewChatTitle] = useState('');
   const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [newChatAvatarFile, setNewChatAvatarFile] = useState(null);
+  const [newChatAvatarPreview, setNewChatAvatarPreview] = useState('');
+  const newChatAvatarInputRef = useRef(null);
   const [search, setSearch] = useState('');
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
@@ -212,6 +215,11 @@ export default function ChatPage() {
   const [addMemberIds, setAddMemberIds] = useState([]);
   const [addingMembers, setAddingMembers] = useState(false);
   const [memberActionLoading, setMemberActionLoading] = useState(''); // userId currently being acted on
+  const [showEditConversation, setShowEditConversation] = useState(false);
+  const [editConversationTitle, setEditConversationTitle] = useState('');
+  const [editConversationAvatarFile, setEditConversationAvatarFile] = useState(null);
+  const [editConversationAvatarPreview, setEditConversationAvatarPreview] = useState('');
+  const editConversationAvatarInputRef = useRef(null);
 
   const bottomRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -342,6 +350,14 @@ export default function ChatPage() {
     return directChatNameCache.current[c._id] || 'Direct Chat';
   };
 
+  const getConversationAvatarUrl = (c) => {
+    if (!c) return '';
+    if (c.type === 'group' && c.avatar) return getAssetUrl(c.avatar);
+    const other = (c.participants || []).find((p) => p._id !== user?._id);
+    if (other?.avatar) return getAssetUrl(other.avatar);
+    return '';
+  };
+
   const filteredConversations = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return conversations;
@@ -422,6 +438,7 @@ export default function ChatPage() {
       const other = (c.participants || []).find((p) => p._id !== user?._id);
       if (other?.name) directChatNameCache.current[c._id] = other.name;
     });
+    const needCount = [];
     // Preserve any current unread state across refreshes
     setConversations((prev) => {
       const map = new Map(prev.map((p) => [String(p._id), p]));
@@ -435,7 +452,10 @@ export default function ChatPage() {
         const lastMsgTs = c.lastMessageAt ? new Date(c.lastMessageAt).getTime() : 0;
         const lastMsgFromSelf = c.lastMessage && user?.name && c.lastMessage.senderName === user.name;
         const hasUnread = lastMsgTs > seenTs && !lastMsgFromSelf;
-        const unreadCount = hasUnread ? (existing?.unreadCount || 1) : 0;
+        const unreadCount = hasUnread ? (existing?.unreadCount ?? 0) : 0;
+        if (hasUnread) {
+          needCount.push({ conversationId: c._id, seenTs });
+        }
         return {
           ...c,
           unreadCount,
@@ -443,6 +463,20 @@ export default function ChatPage() {
         };
       });
     });
+
+    if (needCount.length > 0) {
+      await Promise.all(
+        needCount.map(async ({ conversationId, seenTs }) => {
+          const count = await fetchUnreadCount(conversationId, seenTs);
+          if (count != null) {
+            patchConversationMeta(conversationId, {
+              unreadCount: count,
+              hasUnread: count > 0,
+            });
+          }
+        })
+      );
+    }
 
     // If some conversations have a `lastMessageAt` timestamp but no
     // `lastMessage` object (possible when the backend couldn't resolve
@@ -578,7 +612,9 @@ const patchConversationMeta = (conversationId, patch = {}) => {
             const lastMsgTs = conv.lastMessageAt ? new Date(conv.lastMessageAt).getTime() : 0;
             const lastMsgFromSelf = conv.lastMessage && user?.name && conv.lastMessage.senderName === user.name;
             const hasUnread = lastMsgTs > seenTs && !lastMsgFromSelf;
-            const unreadCount = hasUnread ? (conv.unreadCount || 1) : 0;
+            const unreadCount = patch.unreadCount != null
+              ? patch.unreadCount
+              : (hasUnread ? (conv.unreadCount ?? 0) : 0);
             return { ...conv, hasUnread, unreadCount };
           } catch (e) {
             return conv;
@@ -623,6 +659,37 @@ const patchConversationMeta = (conversationId, patch = {}) => {
       attachments: message.attachments || [],
       senderName: message.sender?.name || '',
     };
+  };
+
+  const getConversationSeenTs = (conversationId) => {
+    if (!conversationId || typeof window === 'undefined') return 0;
+    const seenVal = localStorage.getItem(`chat:seen:${conversationId}`);
+    return seenVal ? new Date(seenVal).getTime() : 0;
+  };
+
+  const fetchUnreadCount = async (conversationId, seenTs) => {
+    if (!conversationId) return null;
+    const ts = seenTs != null ? seenTs : getConversationSeenTs(conversationId);
+    try {
+      const res = await chatAPI.getMessageCount(conversationId, {
+        since: new Date(ts).toISOString(),
+      });
+      const count = Number(res?.data?.count);
+      if (!Number.isNaN(count)) return count;
+    } catch {
+      // continue to fallback
+    }
+
+    try {
+      const res = await chatAPI.getMessages(conversationId, { limit: 200 });
+      const messages = res.data.messages || [];
+      return messages.reduce((acc, msg) => {
+        const createdAt = Date.parse(msg.createdAt);
+        return createdAt > ts ? acc + 1 : acc;
+      }, 0);
+    } catch {
+      return null;
+    }
   };
 
   const maybeUpdateDirectChatName = (conversationId, messagesList) => {
@@ -762,7 +829,12 @@ const patchConversationMeta = (conversationId, patch = {}) => {
           if (isNearBottomRef.current) {
             requestAnimationFrame(() => scrollToBottom('smooth'));
           } else {
-            setUnreadCount((c) => c + 1);
+            const senderId = message.sender?._id || message.sender;
+            const amISender = senderId && user?._id && String(senderId) === String(user._id);
+            if (!amISender) {
+              setUnreadCount((c) => c + 1);
+              incrementConversationUnread(conversationId, 1);
+            }
           }
         }
         if (conversationId && lastMessageAt) {
@@ -1487,15 +1559,29 @@ setMentionOpen(false);
     }
 
     try {
-      const res = await chatAPI.createConversation({
-        title: isDirect ? '' : newChatTitle.trim(),
-        participantIds: selectedUserIds,
-        type: isDirect ? 'direct' : 'group',
-      });
+      let payload;
+      if (!isDirect && newChatAvatarFile) {
+        const formData = new FormData();
+        formData.append('title', newChatTitle.trim());
+        formData.append('type', 'group');
+        selectedUserIds.forEach((id) => formData.append('participantIds[]', id));
+        formData.append('avatar', newChatAvatarFile);
+        payload = formData;
+      } else {
+        payload = {
+          title: isDirect ? '' : newChatTitle.trim(),
+          participantIds: selectedUserIds,
+          type: isDirect ? 'direct' : 'group',
+        };
+      }
+
+      const res = await chatAPI.createConversation(payload);
       const c = res.data.conversation;
       setShowComposer(false);
       setNewChatTitle('');
       setSelectedUserIds([]);
+      setNewChatAvatarFile(null);
+      setNewChatAvatarPreview('');
       await refreshConversations();
       setActiveConversationId(c._id);
       toast.success(res.data.reused ? 'Opened existing direct chat' : 'Conversation created');
@@ -1606,13 +1692,49 @@ setMentionOpen(false);
             </p>
 
             {selectedUserIds.length > 1 && (
-              <input
-                className="input"
-                placeholder="Group name (required)"
-                value={newChatTitle}
-                onChange={(e) => setNewChatTitle(e.target.value)}
-                autoFocus
-              />
+              <>
+                <input
+                  className="input"
+                  placeholder="Group name (required)"
+                  value={newChatTitle}
+                  onChange={(e) => setNewChatTitle(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => newChatAvatarInputRef.current?.click()}
+                      className="btn-secondary text-xs py-1.5"
+                    >
+                      {newChatAvatarFile ? 'Change group avatar' : 'Upload group avatar'}
+                    </button>
+                    {newChatAvatarPreview && (
+                      <img
+                        src={newChatAvatarPreview}
+                        alt="Group avatar preview"
+                        className="w-10 h-10 rounded-full object-cover border border-gray-200"
+                      />
+                    )}
+                  </div>
+                  <input
+                    ref={newChatAvatarInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      if (file) {
+                        setNewChatAvatarFile(file);
+                        setNewChatAvatarPreview(URL.createObjectURL(file));
+                      } else {
+                        setNewChatAvatarFile(null);
+                        setNewChatAvatarPreview('');
+                      }
+                    }}
+                  />
+                </div>
+              </>
             )}
 
             <div className="max-h-40 overflow-auto space-y-1">
@@ -1650,9 +1772,9 @@ setMentionOpen(false);
           {uniqueFilteredConversations.map((c, i) => {
             const active = c._id === activeConversationId;
             const isGroup = c.type === 'group';
-            const others = (c.participants || []).filter((p) => p._id !== user?._id);
             const title = getConversationTitle(c);
-            const otherLeft = !isGroup && others.length === 0;
+            const otherLeft = !isGroup && (c.participants || []).filter((p) => p._id !== user?._id).length === 0;
+            const avatarUrl = getConversationAvatarUrl(c);
             return (
               <button
                 key={`${c._id}-${i}`}
@@ -1660,9 +1782,23 @@ setMentionOpen(false);
                 onClick={() => setActiveConversationId(c._id)}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <div className={`font-medium text-sm text-gray-900 truncate flex items-center gap-1.5 min-w-0 ${c.hasUnread ? 'font-semibold' : ''}`}>
-                    <span className="truncate">{title}</span>
-                    {otherLeft && <span className="text-[10px] font-normal text-gray-400 shrink-0">(left)</span>}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full shrink-0 overflow-hidden bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-bold">
+                      {avatarUrl ? (
+                        <img src={avatarUrl} alt={title} className="w-full h-full object-cover" />
+                      ) : (
+                        initials(title)
+                      )}
+                    </div>
+                    <div>
+                    <div className={`font-medium text-sm text-gray-900 truncate flex items-center gap-1.5 min-w-0 ${c.hasUnread ? 'font-semibold' : ''}`}>
+                      <span className="truncate">{title}</span>
+                      {otherLeft && <span className="text-[10px] font-normal text-gray-400 shrink-0">(left)</span>}
+                    </div>
+                     <div className="text-xs text-gray-500 truncate mt-0.5 pr-2" title={c.lastMessage?.body || ''}>
+                      {lastMessagePreview(c, user?.name)}
+                    </div>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {c.unreadCount > 0 && (
@@ -1673,13 +1809,7 @@ setMentionOpen(false);
                     <span className="text-[11px] text-gray-400">{formatSidebarTimestamp(c.lastMessageAt || c.updatedAt)}</span>
                   </div>
                 </div>
-                {/* Last-message preview — shown for every conversation type */}
-                    <div className="text-xs text-gray-500 truncate mt-0.5" title={c.lastMessage?.body || ''}>
-                      {lastMessagePreview(c, user?.name)}
-                    </div>
-                {/* {isGroup && (
-                  <div className="text-[11px] text-gray-400 mt-1">{(c.participants || []).length} member(s)</div>
-                )} */}
+               
               </button>
             );
           })}
@@ -1692,8 +1822,12 @@ setMentionOpen(false);
         ) : (
           <>
             <header className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-bold">
-                {initials(getConversationTitle(activeConversation))}
+              <div className="w-9 h-9 rounded-full overflow-hidden bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-bold">
+                {getConversationAvatarUrl(activeConversation) ? (
+                  <img src={getConversationAvatarUrl(activeConversation)} alt={getConversationTitle(activeConversation)} className="w-full h-full object-cover" />
+                ) : (
+                  initials(getConversationTitle(activeConversation))
+                )}
               </div>
               <div className="flex-1">
                 <h2 className="text-sm font-semibold text-gray-900">
@@ -1734,6 +1868,20 @@ setMentionOpen(false);
                     onClick={openAddMembers}
                   >
                     + Add Member
+                  </button>
+                )}
+                {activeConversation.type === 'group' && isActiveConvAdmin && (
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs py-1.5"
+                    onClick={() => {
+                      setEditConversationTitle(activeConversation.title || '');
+                      setEditConversationAvatarPreview(getConversationAvatarUrl(activeConversation));
+                      setEditConversationAvatarFile(null);
+                      setShowEditConversation(true);
+                    }}
+                  >
+                    Edit Group
                   </button>
                 )}
                 <button
@@ -2513,6 +2661,116 @@ setMentionOpen(false);
                 onClick={submitAddMembers}
               >
                 {addingMembers ? 'Adding...' : `Add ${addMemberIds.length || ''} Member${addMemberIds.length === 1 ? '' : 's'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEditConversation && activeConversation && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">Edit Group</h3>
+                <p className="text-sm text-gray-500">Update the group name or avatar.</p>
+              </div>
+              <button type="button" className="text-gray-400 hover:text-gray-700" onClick={() => setShowEditConversation(false)}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Group name</label>
+                <input
+                  className="input w-full"
+                  value={editConversationTitle}
+                  onChange={(e) => setEditConversationTitle(e.target.value)}
+                  placeholder="Group name"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Group avatar</label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs py-1.5"
+                    onClick={() => editConversationAvatarInputRef.current?.click()}
+                  >
+                    {editConversationAvatarFile ? 'Change avatar' : 'Upload avatar'}
+                  </button>
+                  {(editConversationAvatarPreview || getConversationAvatarUrl(activeConversation)) && (
+                    <div className="w-12 h-12 rounded-full overflow-hidden border border-gray-200">
+                      <img
+                        src={editConversationAvatarPreview || getConversationAvatarUrl(activeConversation)}
+                        alt="avatar preview"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                </div>
+                <input
+                  ref={editConversationAvatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    if (file) {
+                      setEditConversationAvatarFile(file);
+                      setEditConversationAvatarPreview(URL.createObjectURL(file));
+                    } else {
+                      setEditConversationAvatarFile(null);
+                      setEditConversationAvatarPreview('');
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-gray-100 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="btn-secondary text-sm"
+                onClick={() => setShowEditConversation(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary text-sm"
+                onClick={async () => {
+                  if (!activeConversationId) return;
+                  try {
+                    let payload;
+                    if (editConversationAvatarFile) {
+                      const formData = new FormData();
+                      if (editConversationTitle.trim()) {
+                        formData.append('title', editConversationTitle.trim());
+                      }
+                      formData.append('avatar', editConversationAvatarFile);
+                      payload = formData;
+                    } else {
+                      payload = {
+                        title: editConversationTitle.trim(),
+                      };
+                    }
+                    const res = await chatAPI.updateConversation(activeConversationId, payload);
+                    setShowEditConversation(false);
+                    setEditConversationAvatarFile(null);
+                    setEditConversationAvatarPreview('');
+                    await refreshConversations();
+                    setActiveConversationId(res.data.conversation._id);
+                    toast.success('Group updated');
+                  } catch (err) {
+                    toast.error(err.response?.data?.message || 'Failed to update group');
+                  }
+                }}
+              >
+                Save
               </button>
             </div>
           </div>

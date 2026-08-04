@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { usersAPI } from '@/lib/api';
+import { usersAPI, getAssetUrl } from '@/lib/api';
 import { settingsAPI } from '@/lib/api';
 import { ROLE_COLORS, formatDate } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
@@ -118,39 +118,58 @@ export default function TeamPage() {
         <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary-600" /></div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {users.map((u) => (
-            <div key={u._id} className="card p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div className="w-12 h-12 rounded-full bg-primary-600 text-white text-lg flex items-center justify-center font-bold"
-                style={{ background: `linear-gradient(135deg, var(--brand-primary), var(--brand-accent))` }}>
-                  {u.name?.charAt(0).toUpperCase()}
-                </div>
-                <span className={`badge ${ROLE_COLORS[u.role]}`}>{formatRole(u.role)}</span>
-              </div>
-              <h3 className="font-semibold text-gray-900">{u.name}</h3>
-              <p className="text-sm text-gray-500 truncate">{u.email}</p>
-              {u.department && <p className="text-xs text-gray-400 mt-1">{u.department}</p>}
-              {u.shiftCode && <p className="text-xs text-indigo-500 mt-1">Shift: {u.shiftCode}</p>}
-
-              <div className="flex items-center justify-between mt-4">
-                <span className={`text-xs px-2 py-1 rounded-full ${u.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                  {u.isActive ? 'Active' : 'Inactive'}
-                </span>
-                {isAdmin && (
-                  <div className="flex gap-1">
-                    <button onClick={() => { setEditUser(u); setShowModal(true); }}
-                      className="text-xs text-gray-500 hover:text-primary-600 px-2 py-1 rounded hover:bg-gray-100">Edit</button>
-                    <button onClick={() => handleToggleActive(u)}
-                      className="text-xs text-gray-500 hover:text-yellow-600 px-2 py-1 rounded hover:bg-gray-100">
-                      {u.isActive ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <button onClick={() => handleDelete(u._id)}
-                      className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50">Del</button>
+          {users.map((u) => {
+            const avatarUrl = u.avatar ? getAssetUrl(u.avatar) : '';
+            return (
+              <div key={u._id} className="card p-5">
+                <div className="flex items-start justify-between mb-3">
+                  <div
+                    className="w-12 h-12 rounded-full overflow-hidden bg-primary-600 text-white text-lg flex items-center justify-center font-bold"
+                    style={{ background: avatarUrl ? undefined : 'linear-gradient(135deg, var(--brand-primary), var(--brand-accent))' }}
+                  >
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt={u.name} className="w-full h-full object-cover" />
+                    ) : (
+                      u.name?.charAt(0).toUpperCase()
+                    )}
                   </div>
-                )}
+                  <span className={`badge ${ROLE_COLORS[u.role]}`}>{formatRole(u.role)}</span>
+                </div>
+                <h3 className="font-semibold text-gray-900">{u.name}</h3>
+                <p className="text-sm text-gray-500 truncate">{u.email}</p>
+                {u.department && <p className="text-xs text-gray-400 mt-1">{u.department}</p>}
+                {u.shiftCode && <p className="text-xs text-indigo-500 mt-1">Shift: {u.shiftCode}</p>}
+
+                <div className="flex items-center justify-between mt-4">
+                  <span className={`text-xs px-2 py-1 rounded-full ${u.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {u.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                  {isAdmin && (
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => { setEditUser(u); setShowModal(true); }}
+                        className="text-xs text-gray-500 hover:text-primary-600 px-2 py-1 rounded hover:bg-gray-100"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleToggleActive(u)}
+                        className="text-xs text-gray-500 hover:text-yellow-600 px-2 py-1 rounded hover:bg-gray-100"
+                      >
+                        {u.isActive ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(u._id)}
+                        className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50"
+                      >
+                        Del
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -180,8 +199,9 @@ function UserModal({ user: editUser, shiftOptions, departmentOptions, onClose, o
         department: editUser.department || '',
         phone: editUser.phone || '',
         shiftCode: editUser.shiftCode || '',
+        avatar: editUser.avatar || '',
       }
-      : { name: '', email: '', password: '', role: 'member', department: '', phone: '', shiftCode: '' }
+      : { name: '', email: '', password: '', role: 'member', department: '', phone: '', shiftCode: '', avatar: '' }
   );
   const [loading, setLoading] = useState(false);
   const [isNewDepartment, setIsNewDepartment] = useState(
@@ -203,9 +223,22 @@ function UserModal({ user: editUser, shiftOptions, departmentOptions, onClose, o
     e.preventDefault();
     setLoading(true);
     try {
+      let payload = { ...form };
+      if (form.avatarFile) {
+        const formData = new FormData();
+        Object.entries(form).forEach(([key, value]) => {
+          if (key === 'avatarFile') return;
+          if (value !== undefined && value !== null) {
+            formData.append(key, value);
+          }
+        });
+        formData.append('avatar', form.avatarFile);
+        payload = formData;
+      }
+
       let res;
-      if (editUser) res = await usersAPI.update(editUser._id, form);
-      else res = await usersAPI.create(form);
+      if (editUser) res = await usersAPI.update(editUser._id, payload);
+      else res = await usersAPI.create(payload);
       toast.success(editUser ? 'User updated' : 'User created');
       onSaved(res.data.user);
     } catch (err) {
@@ -230,6 +263,14 @@ function UserModal({ user: editUser, shiftOptions, departmentOptions, onClose, o
           </button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-3">
+          <div><label className="label">Profile Image</label>
+            <input
+              className="input"
+              type="file"
+              accept="image/*"
+              onChange={(e) => setForm({ ...form, avatarFile: e.target.files?.[0] })}
+            />
+          </div>
           <div><label className="label">Full Name *</label><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
           {!editUser && <>
             <div><label className="label">Email *</label><input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></div>

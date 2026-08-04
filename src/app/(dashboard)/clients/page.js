@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usersAPI, projectsAPI } from '@/lib/api';
+import { usersAPI, projectsAPI, getAssetUrl } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { ROLE_COLORS, PROJECT_STATUS_COLORS, formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -14,7 +14,7 @@ export default function ClientsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editClient, setEditClient] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', company: '', phone: '' });
+  const [form, setForm] = useState({ name: '', email: '', company: '', phone: '', avatar: '', avatarFile: null, avatarPreview: '' });
 
   const fetchData = () => {
     setLoading(true);
@@ -37,7 +37,7 @@ export default function ClientsPage() {
 
   const openAddModal = () => {
     setEditClient(null);
-    setForm({ name: '', email: '', company: '', phone: '' });
+    setForm({ name: '', email: '', company: '', phone: '', avatar: '', avatarFile: null, avatarPreview: '' });
     setIsModalOpen(true);
   };
 
@@ -48,6 +48,9 @@ export default function ClientsPage() {
       email: client.email || '',
       company: client.company || '',
       phone: client.phone || '',
+      avatar: client.avatar || '',
+      avatarFile: null,
+      avatarPreview: client.avatar ? getAssetUrl(client.avatar) : '',
     });
     setIsModalOpen(true);
   };
@@ -59,17 +62,38 @@ export default function ClientsPage() {
     }
     setSaving(true);
     try {
+      const cleanForm = Object.entries(form).reduce((acc, [key, value]) => {
+        if (key === 'avatarFile' || key === 'avatarPreview') return acc;
+        if (value !== undefined && value !== null) acc[key] = value;
+        return acc;
+      }, {});
+
+      let payload;
+      if (form.avatarFile) {
+        const formData = new FormData();
+        Object.entries(cleanForm).forEach(([key, value]) => {
+          formData.append(key, value);
+        });
+        formData.append('avatar', form.avatarFile);
+        formData.append('role', 'client');
+        payload = formData;
+      } else {
+        payload = { ...cleanForm, role: 'client' };
+      }
+
       if (editClient) {
-        const res = await usersAPI.update(editClient._id, form);
+        const res = await usersAPI.update(editClient._id, payload);
         const updated = res?.data?.user;
         setClients((prev) => prev.map((c) => (c._id === editClient._id ? { ...c, ...(updated || form) } : c)));
         toast.success('Client updated!');
       } else {
-        await usersAPI.create({ ...form, role: 'client' });
+        const res = await usersAPI.create(payload);
+        const created = res?.data?.user;
         toast.success('Client added!');
-        fetchData();
+        if (created) setClients((prev) => [created, ...prev]);
+        else fetchData();
       }
-      setForm({ name: '', email: '', company: '', phone: '' });
+      setForm({ name: '', email: '', company: '', phone: '', avatar: '', avatarFile: null, avatarPreview: '' });
       setEditClient(null);
       setIsModalOpen(false);
     } catch (err) {
@@ -119,12 +143,17 @@ export default function ClientsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {clients.length ? clients.map((client) => {
           const linked = projectsForClient(client.email);
+          const avatarUrl = client.avatar ? getAssetUrl(client.avatar) : '';
           return (
             <div key={client._id} className="card-hover p-5">
               <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white font-bold"
-                style={{ background: `linear-gradient(135deg, var(--brand-primary), var(--brand-accent))` }}>
-                  {client.name?.charAt(0)}
+                <div className="w-12 h-12 rounded-full overflow-hidden bg-primary-600 text-white text-lg flex items-center justify-center font-bold"
+                  style={{ background: avatarUrl ? undefined : 'linear-gradient(135deg, var(--brand-primary), var(--brand-accent))' }}>
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={client.name} className="w-full h-full object-cover" />
+                  ) : (
+                    client.name?.charAt(0).toUpperCase()
+                  )}
                 </div>
                 <div className="flex justify-between flex-1 ">
                   <div>
@@ -206,6 +235,31 @@ export default function ClientsPage() {
               <button onClick={() => { setIsModalOpen(false); setEditClient(null); }} className="text-surface-400 hover:text-surface-600">✕</button>
             </div>
             <form onSubmit={handleSaveClient} className="space-y-4">
+              <div>
+                <label className="label">Profile Photo</label>
+                <input
+                  className="input"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    setForm((prev) => ({
+                      ...prev,
+                      avatarFile: file,
+                      avatarPreview: file ? URL.createObjectURL(file) : prev.avatar ? getAssetUrl(prev.avatar) : '',
+                    }));
+                  }}
+                />
+                {(form.avatarPreview || form.avatar) && (
+                  <div className="mt-2 w-20 h-20 rounded-full overflow-hidden border border-gray-200">
+                    <img
+                      src={form.avatarPreview || getAssetUrl(form.avatar)}
+                      alt="Avatar preview"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+              </div>
               <div>
                 <label className="label">Name *</label>
                 <input className="input" value={form.name}
