@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { authAPI, settingsAPI } from '@/lib/api';
+import { authAPI, settingsAPI, getAssetUrl } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useBranding } from '@/context/BrandingContext';
 import { useOrganizationSettings } from '@/context/OrganizationSettingsContext';

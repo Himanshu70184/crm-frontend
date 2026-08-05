@@ -1220,7 +1220,14 @@ const patchConversationMeta = (conversationId, patch = {}) => {
       } else {
         res = await chatAPI.sendMessage(activeConversationId, { body, mentionIds, replyToId });
       }
-      setMessages((prev) => {
+setMessages((prev) => {
+        // The backend also emits a `chat:message-created` socket event that
+        // adds this message to the list (via upsertMessageInList). If that
+        // event is processed before this HTTP response, the message is already
+        // present — so we must dedupe by _id here, otherwise the message would
+        // appear twice until the page is refreshed.
+        const id = res.data.message?._id;
+        if (id && prev.some((m) => m._id === id)) return prev;
         const next = [...prev, res.data.message];
         prevMessageCountRef.current = next.length;
         return next;
@@ -1776,9 +1783,15 @@ setMentionOpen(false);
             const otherLeft = !isGroup && (c.participants || []).filter((p) => p._id !== user?._id).length === 0;
             const avatarUrl = getConversationAvatarUrl(c);
             return (
-              <button
+<button
                 key={`${c._id}-${i}`}
-                className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-colors ${active ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-colors ${
+                  c.hasUnread
+                    ? 'bg-blue-50/70 hover:bg-blue-100'
+                    : active
+                      ? 'bg-blue-50'
+                      : 'bg-white hover:bg-gray-50'
+                }`}
                 onClick={() => setActiveConversationId(c._id)}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -1795,7 +1808,7 @@ setMentionOpen(false);
                       <span className="truncate">{title}</span>
                       {otherLeft && <span className="text-[10px] font-normal text-gray-400 shrink-0">(left)</span>}
                     </div>
-                     <div className="text-xs text-gray-500 truncate mt-0.5 pr-2" title={c.lastMessage?.body || ''}>
+<div className={`text-xs truncate mt-0.5 pr-2 ${c.hasUnread ? 'font-semibold text-gray-800' : 'text-gray-500'}`} title={c.lastMessage?.body || ''}>
                       {lastMessagePreview(c, user?.name)}
                     </div>
                     </div>
@@ -2579,9 +2592,13 @@ setMentionOpen(false);
                 const isSelf = member._id === user?._id;
                 const acting = memberActionLoading === member._id;
                 return (
-                  <div key={member._id} className="px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-semibold shrink-0">
-                      {initials(member.name)}
+<div key={member._id} className="px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full overflow-hidden bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-semibold shrink-0">
+                      {member.avatar ? (
+                        <img src={getAssetUrl(member.avatar)} alt={member.name} className="w-full h-full object-cover" />
+                      ) : (
+                        initials(member.name)
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">
