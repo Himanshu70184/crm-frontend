@@ -38,7 +38,7 @@ function truncatePreview(text, maxWords = 3) {
 // shown as a paperclip indicator.
 function lastMessagePreview(c, currentUserName) {
   const lm = c?.lastMessage;
-  if (!lm) return c?.lastMessageAt ? 'Message' : 'No messages yet';
+  if (!lm) return 'No messages yet';
   const body = truncatePreview(lm.body);
   const hasAttachments = Array.isArray(lm.attachments) && lm.attachments.length > 0;
   const text = body || (hasAttachments ? '📎 Attachment' : '');
@@ -98,6 +98,8 @@ function formatBytes(bytes) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+const CONVERSATION_PAGE_SIZE = 20;
 
 const URL_REGEX = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,:;"')\]])/gi;
 
@@ -189,11 +191,18 @@ export default function ChatPage() {
   const { can: canRead } = usePermission('chat', 'read');
   const { can: canCreate } = usePermission('chat', 'create');
 
-  const [conversations, setConversations] = useState([]);
+const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState('');
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreConversations, setHasMoreConversations] = useState(false);
+  const [conversationPage, setConversationPage] = useState(1);
+  // Older-message pagination: whether the active conversation has more
+  // messages before the oldest one currently loaded, and a loading flag.
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [people, setPeople] = useState([]);
   const [showComposer, setShowComposer] = useState(false);
@@ -424,91 +433,80 @@ export default function ChatPage() {
     setForwardMentionUserIds((prev) => prev.filter((id) => validIds.has(id)));
   }, [forwardMentionCandidates]);
 
-  const refreshConversations = async () => {
-    const res = await chatAPI.getConversations();
-    const list = [...(res.data.conversations || [])].sort((a, b) => {
+// Loads a page of conversations (defaults to the first page) and merges
+  // them into the list. `append` controls whether the returned page replaces
+  // the current list (false — used for refresh/polling) or is appended to it
+  // (true — used by the "Load more" button).
+  const refreshConversations = async ({ page = 1, append = false } = {}) => {
+    const res = await chatAPI.getConversations({ page, limit: CONVERSATION_PAGE_SIZE });
+    const fetched = (res.data.conversations || []).sort((a, b) => {
       const aTime = new Date(a.lastMessageAt || a.updatedAt || a.createdAt).getTime();
       const bTime = new Date(b.lastMessageAt || b.updatedAt || b.createdAt).getTime();
       return bTime - aTime; // newest activity first
     });
+    const fetchedTotal = Number(res.data.total) || 0;
+
     // Snapshot the other participant's name for every direct chat we can
     // still see them in, so it's available later if they leave.
-    list.forEach((c) => {
+    fetched.forEach((c) => {
       if (c.type === 'group') return;
       const other = (c.participants || []).find((p) => p._id !== user?._id);
       if (other?.name) directChatNameCache.current[c._id] = other.name;
     });
-    const needCount = [];
-    // Preserve any current unread state across refreshes
+
+// Preserve any current unread state across refreshes. The server tracks
+    // per-user unread counts (ChatReadState) and returns them as
+    // `conversation.unreadCount` — that is the source of truth. We merge it
+    // with the previous state so realtime badge updates aren't lost between
+    // refreshes, and derive `hasUnread` from the count.
     setConversations((prev) => {
       const map = new Map(prev.map((p) => [String(p._id), p]));
-      return list.map((c) => {
-        const existing = map.get(String(c._id));
-        // Compute local last-seen from localStorage so refresh shows unread
-        // state even across reloads/sessions on this browser.
-        const seenKey = `chat:seen:${c._id}`;
-        const seenVal = typeof window !== 'undefined' ? localStorage.getItem(seenKey) : null;
-        const seenTs = seenVal ? new Date(seenVal).getTime() : 0;
-        const lastMsgTs = c.lastMessageAt ? new Date(c.lastMessageAt).getTime() : 0;
+      const merged = map;
+      fetched.forEach((c) => {
+        const existing = merged.get(String(c._id));
+        // Server-provided unread count (0 default). Prefer the freshest non-null
+        // value so a bump from a realtime event isn't overwritten by a stale
+        // refresh that hasn't seen the new message yet.
+        const serverCount = Math.max(0, Number(c.unreadCount) || 0);
+        const currentCount = existing?.unreadCount ?? 0;
+        const unread = serverCount > 0 ? serverCount : currentCount;
+        // A message the user sent themselves should never count as unread.
         const lastMsgFromSelf = c.lastMessage && user?.name && c.lastMessage.senderName === user.name;
-        const hasUnread = lastMsgTs > seenTs && !lastMsgFromSelf;
-        const unreadCount = hasUnread ? (existing?.unreadCount ?? 0) : 0;
-        if (hasUnread) {
-          needCount.push({ conversationId: c._id, seenTs });
-        }
-        return {
+        const effective = lastMsgFromSelf ? 0 : unread;
+        merged.set(String(c._id), {
           ...c,
-          unreadCount,
-          hasUnread,
-        };
+          unreadCount: effective,
+          hasUnread: effective > 0,
+        });
       });
+      const list = Array.from(merged.values());
+      return sortConversations(list);
     });
 
-    if (needCount.length > 0) {
-      await Promise.all(
-        needCount.map(async ({ conversationId, seenTs }) => {
-          const count = await fetchUnreadCount(conversationId, seenTs);
-          if (count != null) {
-            patchConversationMeta(conversationId, {
-              unreadCount: count,
-              hasUnread: count > 0,
-            });
-          }
-        })
-      );
-    }
+    // Whether more pages exist beyond what we've loaded so far.
+    const loadedCount = append ? (conversationPage) * CONVERSATION_PAGE_SIZE : fetched.length;
+    setHasMoreConversations(loadedCount < fetchedTotal);
 
-    // If some conversations have a `lastMessageAt` timestamp but no
-    // `lastMessage` object (possible when the backend couldn't resolve
-    // the message in the aggregation), fetch the latest message for a
-    // few of them so the sidebar preview can show the text.
-    (async () => {
-      try {
-        const need = list.filter((c) => c.lastMessageAt && !c.lastMessage).slice(0, 10);
-        await Promise.all(
-          need.map(async (c) => {
-            try {
-              const res = await chatAPI.getMessages(c._id, { limit: 1 });
-              const msgs = res.data.messages || [];
-              if (msgs.length) {
-                const m = msgs[msgs.length - 1];
-                patchConversationMeta(c._id, { lastMessageAt: m.createdAt || c.lastMessageAt, lastMessage: deriveLastMessage(m) });
-              }
-            } catch (e) {
-              // ignore per-conversation failures
-            }
-          })
-        );
-      } catch (e) {
-        // ignore
-      }
-    })();
     setActiveConversationId((prev) => {
-      if (prev && list.some((c) => c._id === prev)) return prev;
-      // list[0] is now guaranteed to be the most recently active
-      // conversation, not just whatever the backend happened to return first.
-      return list.length > 0 ? list[0]._id : '';
+      if (prev && fetched.some((c) => c._id === prev)) return prev;
+      if (prev && !append) return prev; // keep current selection on refresh
+      return fetched.length > 0 && !prev ? fetched[0]._id : '';
     });
+  };
+
+  // Loads the next page of conversations and appends it to the sidebar list.
+  const loadMoreConversations = async () => {
+    if (loadingMore || !hasMoreConversations) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = conversationPage + 1;
+      await refreshConversations({ page: nextPage, append: true });
+      setConversationPage(nextPage);
+    } catch {
+      toast.error('Failed to load more conversations');
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   // Central place to update "am I at the bottom" — keeps the ref (for async
@@ -667,7 +665,7 @@ const patchConversationMeta = (conversationId, patch = {}) => {
     return seenVal ? new Date(seenVal).getTime() : 0;
   };
 
-  const fetchUnreadCount = async (conversationId, seenTs) => {
+const fetchUnreadCount = async (conversationId, seenTs) => {
     if (!conversationId) return null;
     const ts = seenTs != null ? seenTs : getConversationSeenTs(conversationId);
     try {
@@ -677,19 +675,9 @@ const patchConversationMeta = (conversationId, patch = {}) => {
       const count = Number(res?.data?.count);
       if (!Number.isNaN(count)) return count;
     } catch {
-      // continue to fallback
+      // ignore — unread badge is computed locally anyway
     }
-
-    try {
-      const res = await chatAPI.getMessages(conversationId, { limit: 200 });
-      const messages = res.data.messages || [];
-      return messages.reduce((acc, msg) => {
-        const createdAt = Date.parse(msg.createdAt);
-        return createdAt > ts ? acc + 1 : acc;
-      }, 0);
-    } catch {
-      return null;
-    }
+    return null;
   };
 
   const maybeUpdateDirectChatName = (conversationId, messagesList) => {
@@ -699,18 +687,24 @@ const patchConversationMeta = (conversationId, patch = {}) => {
     }
   };
 
+// Message page size — the most-recent messages shown when opening a chat.
+  const MESSAGE_PAGE_SIZE = 10;
+
   const loadMessages = async (conversationId, { forceScroll = false } = {}) => {
     if (!conversationId) return;
-    const res = await chatAPI.getMessages(conversationId, { limit: 100 });
+    const res = await chatAPI.getMessages(conversationId, { limit: MESSAGE_PAGE_SIZE });
     const newMessages = [...(res.data.messages || [])].sort(
       (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
     );
+    // Whether there are even older messages before this page (used to show
+    // the "Load older messages" control).
+    setHasOlderMessages(!!res.data.hasMore);
     maybeUpdateDirectChatName(conversationId, newMessages);
     const added = newMessages.length - prevMessageCountRef.current;
     setMessages(newMessages);
     prevMessageCountRef.current = newMessages.length;
 
-// Keep the sidebar preview in sync from the loaded messages so it works
+    // Keep the sidebar preview in sync from the loaded messages so it works
     // even if the backend conversation list doesn't include lastMessage yet.
     const lastMsg = newMessages.length ? newMessages[newMessages.length - 1] : null;
     if (lastMsg) {
@@ -729,6 +723,38 @@ const patchConversationMeta = (conversationId, patch = {}) => {
       } else {
         setUnreadCount((c) => c + added);
       }
+    }
+  };
+
+  // Loads the next oldest page of messages (before the oldest currently
+  // loaded one) and prepends them to the list, keeping chat scroll intact.
+  const loadOlderMessages = async () => {
+    if (!activeConversationId || loadingOlderMessages || !hasOlderMessages) return;
+    const oldest = messages.length ? messages[0] : null;
+    if (!oldest) return;
+    setLoadingOlderMessages(true);
+    try {
+      const res = await chatAPI.getMessages(activeConversationId, {
+        before: oldest.createdAt,
+        limit: MESSAGE_PAGE_SIZE,
+      });
+      const older = [...(res.data.messages || [])].sort(
+        (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+      );
+      setHasOlderMessages(!!res.data.hasMore);
+      setMessages((prev) => {
+        const seen = new Set(prev.map((m) => String(m._id)));
+        const uniqueOlder = older.filter((m) => !seen.has(String(m._id)));
+        const next = [...uniqueOlder, ...prev].sort(
+          (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+        );
+        prevMessageCountRef.current = next.length;
+        return next;
+      });
+    } catch {
+      toast.error('Failed to load older messages');
+    } finally {
+      setLoadingOlderMessages(false);
     }
   };
 
@@ -934,13 +960,37 @@ const patchConversationMeta = (conversationId, patch = {}) => {
     }
   }, [searchParams, conversations]);
 
-  useEffect(() => {
+useEffect(() => {
     if (!activeConversationId) return;
-    // Clear the unread indicator for the conversation the user opened
+    // Clear the unread indicator for the conversation the user opened, and
+    // tell the server to reset this user's tracked unread count so subsequent
+    // refreshes (and the sidebar badge) stay in sync.
     clearConversationUnread(activeConversationId);
+    chatAPI.markConversationRead(activeConversationId).catch(() => {
+      // Non-fatal — the local badge is already cleared; the server count will
+      // reconcile on the next refresh.
+    });
     prevMessageCountRef.current = 0;
     setUnreadCount(0);
     setNearBottom(true);
+
+    // Load the FULL conversation details (rich participant/admin/createdBy
+    // data) on demand, since the sidebar list only carries light name/avatar
+    // population. Patching it into the list keeps the Members modal, member
+    // counts and admin checks fully populated without a heavy list query.
+    chatAPI
+      .getConversationById(activeConversationId)
+      .then((res) => {
+        const full = res.data.conversation;
+        if (full) {
+          setConversations((prev) =>
+            prev.map((c) => (c._id === full._id ? { ...c, ...full } : c))
+          );
+        }
+      })
+      .catch(() => {
+        // Non-fatal — fall back to the light sidebar data already in state.
+      });
     if (socketRef.current?.connected) {
       if (
         joinedConversationIdRef.current &&
@@ -1789,7 +1839,7 @@ setMentionOpen(false);
                   c.hasUnread
                     ? 'bg-blue-50/70 hover:bg-blue-100'
                     : active
-                      ? 'bg-blue-50'
+                      ? 'bg-green-50'
                       : 'bg-white hover:bg-gray-50'
                 }`}
                 onClick={() => setActiveConversationId(c._id)}
@@ -1823,10 +1873,21 @@ setMentionOpen(false);
                   </div>
                 </div>
                
-              </button>
+</button>
             );
           })}
         </div>
+
+        {hasMoreConversations && (
+          <button
+            type="button"
+            onClick={loadMoreConversations}
+            disabled={loadingMore}
+            className="w-full text-center text-xs font-medium text-[var(--brand-primary)] py-2.5 border-t border-gray-100 hover:bg-gray-50 transition-colors disabled:opacity-60"
+          >
+            {loadingMore ? 'Loading...' : 'Load more conversations'}
+          </button>
+        )}
       </aside>
 
       <section className="card flex flex-col overflow-hidden">
@@ -2031,21 +2092,27 @@ setMentionOpen(false);
             <div className="relative flex-1 overflow-hidden">
             <div
               ref={messagesContainerRef}
-              onScroll={(e) => {
+onScroll={(e) => {
                 const el = e.currentTarget;
                 const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
                 // Small threshold so "basically at the bottom" still counts,
                 // without requiring pixel-perfect scroll position.
                 setNearBottom(distanceFromBottom < 120);
+                // Infinite scroll backwards: when the user scrolls up near the
+                // very top of the thread and older messages exist, load the
+                // next older page automatically (no button needed).
+                if (el.scrollTop < 60 && hasOlderMessages && !loadingOlderMessages) {
+                  loadOlderMessages();
+                }
                 if (openActionMenuId) setOpenActionMenuId('');
               }}
               className="h-full overflow-y-auto p-4 bg-gradient-to-b from-white to-slate-50">
-              <div ref={contentRef} className="space-y-3">
+<div ref={contentRef} className="space-y-3">
               {messages.length === 0 && (
                 <p className="text-sm text-gray-400">No messages yet. Start the conversation.</p>
               )}
 
-              {messageGroups.map((group) => (
+{messageGroups.map((group) => (
                 <div key={group.dateLabel + group.messages[0]._id}>
                   <div className="flex justify-center my-3">
                     <span className="text-[11px] font-medium text-gray-500 bg-gray-100 rounded-full px-3 py-1">
@@ -2339,7 +2406,7 @@ setMentionOpen(false);
                     })}
                   </div>
                 </div>
-              ))}
+))}
               <div ref={bottomRef} />
               </div>
             </div>

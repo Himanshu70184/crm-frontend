@@ -200,6 +200,7 @@ export const rolesAPI = {
 // ─── Chat ────────────────────────────────────────────────────────────────────
 export const chatAPI = {
   getConversations: (params) => api.get('/chat/conversations', { params }),
+  getConversationById: (conversationId) => api.get(`/chat/conversations/${conversationId}`),
   createConversation: (data) => sendData('post', '/chat/conversations', data),
   updateConversation: (conversationId, data) => sendData('put', `/chat/conversations/${conversationId}`, data),
   getConversationMembers: (conversationId) => api.get(`/chat/conversations/${conversationId}/members`),
@@ -229,9 +230,13 @@ export const chatAPI = {
   },
   updateMessage: (messageId, data) => api.put(`/chat/messages/${messageId}`, data),
   deleteMessage: (messageId) => api.delete(`/chat/messages/${messageId}`),
-  // Pin/unpin a message. Scope: 'everyone' (group chats) or 'self' (direct chats)
+// Pin/unpin a message. Scope: 'everyone' (group chats) or 'self' (direct chats)
   pinMessage: (messageId, data) => api.post(`/chat/messages/${messageId}/pin`, data),
   unpinMessage: (messageId, data) => api.post(`/chat/messages/${messageId}/unpin`, data),
+  // Marks a conversation as read for the current user (server-tracked unread → 0).
+  markConversationRead: (conversationId) => api.post(`/chat/conversations/${conversationId}/read`),
+  // Total unread messages across all of the current user's conversations.
+  getUnreadCount: () => api.get('/chat/unread-count'),
 };
 
 export default api;
