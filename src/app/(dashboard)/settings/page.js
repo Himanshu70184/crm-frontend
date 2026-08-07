@@ -8,6 +8,7 @@ import { useOrganizationSettings } from '@/context/OrganizationSettingsContext';
 import { ORGANIZATION_MODULES, normalizeOrganizationModules } from '@/lib/organizationModules';
 import { ROLE_COLORS } from '@/lib/utils';
 import PageHeader from '@/components/ui/PageHeader';
+import Avatar from '@/components/ui/Avatar';
 import toast from 'react-hot-toast';
 
 const DEFAULT_BRANDING = {
@@ -242,21 +243,13 @@ export default function SettingsPage() {
       {activeTab === 'profile' && (
         <div className="card p-6">
           <div className="flex items-center gap-4 mb-6">
-            <div
-              className="w-16 h-16 rounded-2xl overflow-hidden bg-slate-100 border border-slate-200"
-            >
-              {profile.avatar || user?.avatar ? (
-                <img
-                  src={profile.avatar || user?.avatar}
-                  alt={user?.name}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-white text-2xl font-bold" style={{ backgroundColor: 'var(--brand-primary)' }}>
-                  {user?.name?.charAt(0).toUpperCase()}
-                </div>
-              )}
-            </div>
+            <Avatar
+              name={user?.name}
+              src={profile.avatar || user?.avatar}
+              size={16}
+              rounded="xl"
+              textClassName="text-2xl"
+            />
             <div>
               <h3 className="font-semibold text-surface-900">{user?.name}</h3>
               <p className="text-sm text-surface-500">{user?.email}</p>

@@ -10,6 +10,7 @@ import {
   IconDashboard, IconProjects, IconTasks, IconClock, IconAttendance,
   IconTeam, IconChart, IconClients, IconSettings, IconLogo, IconChat,
 } from '@/components/ui/Icons';
+import Avatar from '@/components/ui/Avatar';
 
 const navItems = [
   { href: '/dashboard',     label: 'Dashboard',    Icon: IconDashboard, roles: ['super_admin', 'admin', 'hr', 'manager', 'team_lead', 'team_member', 'member', 'client'] },
@@ -77,20 +78,13 @@ export default function Sidebar() {
 
       <div className="p-4 border-t border-white/10">
         <div className="flex items-center gap-3 px-2">
-          {user?.avatar ? (
-            <img
-              src={user.avatar}
-              alt={user?.name}
-              className="w-9 h-9 object-cover rounded-xl"
-            />
-          ) : (
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold"
-              style={{ background: `linear-gradient(135deg, var(--brand-primary), var(--brand-accent))` }}
-            >
-              {user?.name?.charAt(0).toUpperCase()}
-            </div>
-          )}
+          <Avatar
+            name={user?.name}
+            src={user?.avatar}
+            size={9}
+            rounded="xl"
+            textClassName="text-sm"
+          />
           <div className="min-w-0">
             <p className="text-sm font-semibold text-white truncate">{user?.name}</p>
             <p className="text-xs text-white/40 capitalize">{user?.role}</p>

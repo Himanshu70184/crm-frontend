@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usersAPI, projectsAPI, getAssetUrl } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
+import Avatar from '@/components/ui/Avatar';
 import { ROLE_COLORS, PROJECT_STATUS_COLORS, formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -143,18 +144,15 @@ export default function ClientsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {clients.length ? clients.map((client) => {
           const linked = projectsForClient(client.email);
-          const avatarUrl = client.avatar ? getAssetUrl(client.avatar) : '';
           return (
             <div key={client._id} className="card-hover p-5">
               <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-full overflow-hidden bg-primary-600 text-white text-lg flex items-center justify-center font-bold"
-                  style={{ background: avatarUrl ? undefined : 'linear-gradient(135deg, var(--brand-primary), var(--brand-accent))' }}>
-                  {avatarUrl ? (
-                    <img src={avatarUrl} alt={client.name} className="w-full h-full object-cover" />
-                  ) : (
-                    client.name?.charAt(0).toUpperCase()
-                  )}
-                </div>
+                <Avatar
+                  name={client.name}
+                  src={client.avatar}
+                  size={12}
+                  textClassName="text-lg"
+                />
                 <div className="flex justify-between flex-1 ">
                   <div>
                   <h3 className="font-semibold text-surface-900 truncate">{client.name}</h3>
@@ -250,12 +248,13 @@ export default function ClientsPage() {
                     }));
                   }}
                 />
-                {(form.avatarPreview || form.avatar) && (
-                  <div className="mt-2 w-20 h-20 rounded-full overflow-hidden border border-gray-200">
-                    <img
-                      src={form.avatarPreview || getAssetUrl(form.avatar)}
-                      alt="Avatar preview"
-                      className="w-full h-full object-cover"
+{(form.avatarPreview || form.avatar) && (
+                  <div className="mt-2">
+                    <Avatar
+                      name={form.name}
+                      src={form.avatarPreview || form.avatar}
+                      size={16}
+                      imgClassName="border border-gray-200"
                     />
                   </div>
                 )}

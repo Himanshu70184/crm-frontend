@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { usersAPI, getAssetUrl } from '@/lib/api';
+import { usersAPI } from '@/lib/api';
 import { settingsAPI } from '@/lib/api';
-import { ROLE_COLORS, formatDate } from '@/lib/utils';
+import { ROLE_COLORS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
+import Avatar from '@/components/ui/Avatar';
 import toast from 'react-hot-toast';
 
 // Displays roles in Title Case (e.g. "team_member" -> "Team Member"),
@@ -119,20 +120,15 @@ export default function TeamPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {users.map((u) => {
-            const avatarUrl = u.avatar ? getAssetUrl(u.avatar) : '';
-            return (
+              return (
               <div key={u._id} className="card p-5">
                 <div className="flex items-start justify-between mb-3">
-                  <div
-                    className="w-12 h-12 rounded-full overflow-hidden bg-primary-600 text-white text-lg flex items-center justify-center font-bold"
-                    style={{ background: avatarUrl ? undefined : 'linear-gradient(135deg, var(--brand-primary), var(--brand-accent))' }}
-                  >
-                    {avatarUrl ? (
-                      <img src={avatarUrl} alt={u.name} className="w-full h-full object-cover" />
-                    ) : (
-                      u.name?.charAt(0).toUpperCase()
-                    )}
-                  </div>
+                  <Avatar
+                    name={u.name}
+                    src={u.avatar}
+                    size={12}
+                    textClassName="text-lg"
+                  />
                   <span className={`badge ${ROLE_COLORS[u.role]}`}>{formatRole(u.role)}</span>
                 </div>
                 <h3 className="font-semibold text-gray-900">{u.name}</h3>

@@ -3,19 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { chatAPI, usersAPI, getAssetUrl } from '@/lib/api';
+import Avatar from '@/components/ui/Avatar';
 import { getChatSocket, disconnectChatSocket } from '@/lib/socket';
 import { useAuth } from '@/context/AuthContext';
 import usePermission from '@/hooks/usePermission';
 import toast from 'react-hot-toast';
-
-function initials(name = '') {
-  return String(name)
-    .split(' ')
-    .map((p) => p[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-}
 
 function formatTime(v) {
   if (!v) return '';
@@ -117,6 +109,13 @@ const mentionHandleFor = (name) => String(name || '').trim().toLowerCase().repla
 function stripMentions(text, mentions = []) {
   if (!text) return text;
   let result = String(text);
+
+  // Always strip the @everyone tag from the body. When @everyone is used the
+  // backend populates `mentions` with the actual participant objects (not an
+  // "Everyone" entry), so the per-mention stripping below can never match it.
+  // Leaving it in would duplicate "@everyone" in the body on top of the
+  // single "@everyone" already rendered in the "Mentioned:" section.
+  result = result.replace(/@everyone\b/gi, '');
 
   if (mentions.length > 0) {
     mentions.forEach((mention) => {
@@ -348,12 +347,17 @@ const [conversations, setConversations] = useState([]);
 
   const isOtherParticipantPresent = (c) => {
     if (!c || c.type === 'group') return true;
+    // Self-chats (Note to Self) have no other participant — but the chat is
+    // still fully usable, so treat it as "present" (composer stays enabled).
+    if (c.type === 'self') return true;
     return (c.participants || []).some((p) => p._id !== user?._id);
   };
 
   const getConversationTitle = (c) => {
     if (!c) return '';
     if (c.type === 'group') return c.title || 'Untitled Group';
+    // Self-chats show the user's own name as the title.
+    if (c.type === 'self') return user?.name || c.title || 'Note to Self';
     const other = (c.participants || []).find((p) => p._id !== user?._id);
     if (other?.name) return other.name;
     return directChatNameCache.current[c._id] || 'Direct Chat';
@@ -362,6 +366,9 @@ const [conversations, setConversations] = useState([]);
   const getConversationAvatarUrl = (c) => {
     if (!c) return '';
     if (c.type === 'group' && c.avatar) return getAssetUrl(c.avatar);
+    // Self-chats (Note to Self) are private to the current user — show the
+    // user's own profile avatar rather than falling back to initials.
+    if (c.type === 'self') return user?.avatar ? getAssetUrl(user.avatar) : '';
     const other = (c.participants || []).find((p) => p._id !== user?._id);
     if (other?.avatar) return getAssetUrl(other.avatar);
     return '';
@@ -1600,6 +1607,24 @@ setMentionOpen(false);
     }
   };
 
+  // Opens the user's private "Note to Self" chat. If one doesn't exist yet,
+  // the backend creates it (and reuses it on subsequent calls).
+  const openNoteToSelf = async () => {
+    if (!canCreate) return;
+    try {
+      const res = await chatAPI.createConversation({
+        title: 'Note to Self',
+        type: 'self',
+      });
+      const c = res.data.conversation;
+      setShowComposer(false);
+      await refreshConversations();
+      setActiveConversationId(c._id);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to open Note to Self');
+    }
+  };
+
   const createConversation = async () => {
     if (!canCreate) return;
     if (selectedUserIds.length === 0) {
@@ -1721,16 +1746,28 @@ setMentionOpen(false);
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)] grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
+    <div className="h-[calc(100vh-8rem)] grid grid-cols-1 lg:grid-cols-[330px_1fr] gap-4">
       <aside className="card flex flex-col overflow-hidden">
         <div className="p-4 border-b border-gray-100">
-          <div className="flex items-center justify-between gap-2">
-            <h1 className="text-lg font-bold text-gray-900">Team Chat</h1>
-            {canCreate && (
-              <button className="btn-primary text-xs py-1.5" onClick={() => setShowComposer((v) => !v)}>
-                {showComposer ? 'Close' : 'New Chat'}
-              </button>
-            )}
+          <div className="flex items-center justify-between gap-1">
+            <h1 className="text-sm font-bold text-gray-900">Team Chat</h1>
+            <div className="flex items-center gap-1.5">
+              {canCreate && (
+                <button
+                  type="button"
+                  className="btn-secondary text-xs py-1"
+                  onClick={openNoteToSelf}
+                  title="Write private notes to yourself"
+                >
+                  📝 Note to Self
+                </button>
+              )}
+              {canCreate && (
+                <button className="btn-primary text-xs py-1" onClick={() => setShowComposer((v) => !v)}>
+                  {showComposer ? 'Close' : 'New Chat'}
+                </button>
+              )}
+            </div>
           </div>
           <input
             className="input mt-3"
@@ -1830,7 +1867,9 @@ setMentionOpen(false);
             const active = c._id === activeConversationId;
             const isGroup = c.type === 'group';
             const title = getConversationTitle(c);
-            const otherLeft = !isGroup && (c.participants || []).filter((p) => p._id !== user?._id).length === 0;
+            // Self-chats (Note to Self) are single-participant by design — never
+            // show "(left)" for them.
+            const otherLeft = !isGroup && c.type !== 'self' && (c.participants || []).filter((p) => p._id !== user?._id).length === 0;
             const avatarUrl = getConversationAvatarUrl(c);
             return (
 <button
@@ -1846,13 +1885,8 @@ setMentionOpen(false);
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-full shrink-0 overflow-hidden bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-bold">
-                      {avatarUrl ? (
-                        <img src={avatarUrl} alt={title} className="w-full h-full object-cover" />
-                      ) : (
-                        initials(title)
-                      )}
-                    </div>
+                    <Avatar name={title} src={avatarUrl} size={9} textClassName="text-xs" />
+                    
                     <div>
                     <div className={`font-medium text-sm text-gray-900 truncate flex items-center gap-1.5 min-w-0 ${c.hasUnread ? 'font-semibold' : ''}`}>
                       <span className="truncate">{title}</span>
@@ -1896,13 +1930,7 @@ setMentionOpen(false);
         ) : (
           <>
             <header className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full overflow-hidden bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-bold">
-                {getConversationAvatarUrl(activeConversation) ? (
-                  <img src={getConversationAvatarUrl(activeConversation)} alt={getConversationTitle(activeConversation)} className="w-full h-full object-cover" />
-                ) : (
-                  initials(getConversationTitle(activeConversation))
-                )}
-              </div>
+              <Avatar name={getConversationTitle(activeConversation)} src={getConversationAvatarUrl(activeConversation)} size={9} textClassName="text-xs" />
               <div className="flex-1">
                 <h2 className="text-sm font-semibold text-gray-900">
                   {getConversationTitle(activeConversation)}
@@ -1910,7 +1938,9 @@ setMentionOpen(false);
                 <p className="text-xs text-gray-400">
                   {activeConversation.type === 'group'
                     ? `${(activeConversation.participants || []).length} member(s)`
-                    : (isOtherParticipantPresent(activeConversation) ? 'Direct message' : 'This person has left the conversation')}
+                    : (activeConversation.type === 'self'
+                        ? 'Private notes — only visible to you'
+                        : (isOtherParticipantPresent(activeConversation) ? 'Direct message' : 'This person has left the conversation'))}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -1958,20 +1988,24 @@ setMentionOpen(false);
                     Edit Group
                   </button>
                 )}
-                <button
-                  type="button"
-                  className="btn-secondary text-xs py-1.5"
-                  onClick={() => setShowMembers(true)}
-                >
-                  Members
-                </button>
-                <button
-                  type="button"
-                  className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition"
-                  onClick={leaveActiveConversation}
-                >
-                  Leave Chat
-                </button>
+                {activeConversation.type !== 'self' && (
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs py-1.5"
+                    onClick={() => setShowMembers(true)}
+                  >
+                    Members
+                  </button>
+                )}
+                {activeConversation.type !== 'self' && (
+                  <button
+                    type="button"
+                    className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition"
+                    onClick={leaveActiveConversation}
+                  >
+                    Leave Chat
+                  </button>
+                )}
               </div>
             </header>
 
@@ -2660,13 +2694,7 @@ onScroll={(e) => {
                 const acting = memberActionLoading === member._id;
                 return (
 <div key={member._id} className="px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full overflow-hidden bg-[var(--brand-primary)] text-white flex items-center justify-center text-xs font-semibold shrink-0">
-                      {member.avatar ? (
-                        <img src={getAssetUrl(member.avatar)} alt={member.name} className="w-full h-full object-cover" />
-                      ) : (
-                        initials(member.name)
-                      )}
-                    </div>
+                    <Avatar name={member.name} src={member.avatar ? getAssetUrl(member.avatar) : ''} size={8} textClassName="text-xs font-semibold" />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">
                         <span className="truncate">{member.name}</span>
@@ -2922,9 +2950,7 @@ onScroll={(e) => {
                           className={`flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer ${checked ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}
                         >
                           <input type="checkbox" checked={checked} onChange={() => toggleForwardTarget(c._id)} />
-                          <div className="w-7 h-7 rounded-full bg-[var(--brand-primary)] text-white flex items-center justify-center text-[10px] font-semibold shrink-0">
-                            {initials(title)}
-                          </div>
+                          <Avatar name={title} src={getConversationAvatarUrl(c)} size={7} textClassName="text-[10px] font-semibold" />
                           <div className="min-w-0 flex-1">
                             <div className="text-sm font-medium text-gray-900 truncate">{title}</div>
                             <div className="text-[11px] text-gray-400 truncate">
