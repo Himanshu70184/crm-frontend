@@ -86,6 +86,20 @@ function formatWorkedDuration(minutesValue) {
   return parts.join(' ');
 }
 
+// Prefer the idle-adjusted tracked time reported by the desktop Activity
+// Tracker app (workedMs/workedHours) over the wall-clock workMinutes, so the
+// UI shows the actual working time (excluding idle/paused periods).
+function getWorkedMinutes(record) {
+  if (!record) return 0;
+  if (record.workedMs != null && Number(record.workedMs) > 0) {
+    return Math.round(Number(record.workedMs) / 60000);
+  }
+  if (record.workedHours != null && Number(record.workedHours) > 0) {
+    return Math.round(Number(record.workedHours) * 60);
+  }
+  return Number(record.workMinutes) || 0;
+}
+
 async function captureFullScreenshot() {
   if (!navigator.mediaDevices?.getDisplayMedia) {
     throw new Error('Screen capture is not supported in this browser');
@@ -310,7 +324,7 @@ export default function AttendancePage() {
               <div className="rounded-2xl border border-surface-200 bg-surface-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-surface-400 mb-1">Worked</p>
                 <p className="text-lg font-semibold text-surface-900">
-                  {selfTodayRecord.workMinutes ? formatWorkedDuration(selfTodayRecord.workMinutes) : '0m 0s'}
+                  {getWorkedMinutes(selfTodayRecord) ? formatWorkedDuration(getWorkedMinutes(selfTodayRecord)) : '0m 0s'}
                 </p>
                 <p className="text-xs text-surface-500 mt-1">
                   {selfTodayRecord.shiftName || 'Default shift'}
@@ -419,8 +433,8 @@ export default function AttendancePage() {
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="font-medium text-surface-900">{dateLabel}</h4>
                   <span className="text-xs text-surface-500">
-                    {dateRecords.reduce((sum, record) => sum + (record.workMinutes || 0), 0) > 0
-                      ? formatWorkedDuration(dateRecords.reduce((sum, record) => sum + (record.workMinutes || 0), 0))
+                    {dateRecords.reduce((sum, record) => sum + getWorkedMinutes(record), 0) > 0
+                      ? formatWorkedDuration(dateRecords.reduce((sum, record) => sum + getWorkedMinutes(record), 0))
                       : 'No work duration'}
                   </span>
                 </div>
@@ -461,7 +475,7 @@ export default function AttendancePage() {
                           </div>
                           <div>
                             <p className="text-[11px] uppercase text-surface-400">Worked</p>
-                            <p className="text-sm font-semibold text-surface-900">{record.workMinutes ? formatWorkedDuration(record.workMinutes) : '—'}</p>
+                            <p className="text-sm font-semibold text-surface-900">{getWorkedMinutes(record) ? formatWorkedDuration(getWorkedMinutes(record)) : '—'}</p>
                           </div>
                         </div>
 

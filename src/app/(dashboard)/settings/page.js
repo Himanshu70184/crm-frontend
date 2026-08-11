@@ -421,6 +421,33 @@ export default function SettingsPage() {
               />
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="label">Idle Timeout (minutes)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  className="input"
+                  value={settings.attendance?.idleTimeoutMinutes ?? 5}
+                  onChange={(e) => updateField('attendance.idleTimeoutMinutes', Number(e.target.value) || 5)}
+                />
+                <p className="text-xs text-surface-500 mt-1">Inactivity before the desktop Activity Tracker auto-pauses.</p>
+              </div>
+              <div>
+                <label className="label">Screenshot Interval (minutes)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  className="input"
+                  value={settings.attendance?.screenshotIntervalMinutes ?? 10}
+                  onChange={(e) => updateField('attendance.screenshotIntervalMinutes', Number(e.target.value) || 10)}
+                />
+                <p className="text-xs text-surface-500 mt-1">How often the desktop Activity Tracker captures screenshots while running.</p>
+              </div>
+            </div>
+
             <div>
               <p className="label">Weekly Off Days</p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
