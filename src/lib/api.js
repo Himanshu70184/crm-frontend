@@ -139,6 +139,16 @@ export const attendanceAPI = {
   clockIn: (data) => api.post('/attendance/clock-in', data),
   clockOut: (data) => api.post('/attendance/clock-out', data),
   reconcile: (data) => api.post('/attendance/reconcile', data),
+  // NEW — late check-in approval workflow. Route paths match
+  // routes/attendance.js exactly:
+  //   POST /attendance/late-checkin
+  //   GET  /attendance/late-checkin/pending
+  //   PUT  /attendance/late-checkin/:id/approve
+  //   PUT  /attendance/late-checkin/:id/reject
+  requestLateCheckIn: (data) => api.post('/attendance/late-checkin', data),
+  getPendingLateCheckIns: () => api.get('/attendance/late-checkin/pending'),
+  approveLateCheckIn: (id) => api.put(`/attendance/late-checkin/${id}/approve`),
+  rejectLateCheckIn: (id, data) => api.put(`/attendance/late-checkin/${id}/reject`, data),
   getLeaves: (params) => api.get('/attendance/leaves', { params }),
   applyLeave: (data) => api.post('/attendance/leaves', data),
   reviewLeave: (id, data) => api.put(`/attendance/leaves/${id}/review`, data),

@@ -34,6 +34,20 @@ const WEEK_DAYS = [
   ['Saturday', 6],
 ];
 
+// Computes total shift duration and break-adjusted effective work time so
+// admins get an immediate preview while editing a shift's times/break.
+function calcShiftDuration(shift) {
+  if (!shift?.startTime || !shift?.endTime) return null;
+  const [sh, sm] = shift.startTime.split(':').map(Number);
+  const [eh, em] = shift.endTime.split(':').map(Number);
+  let totalMin = (eh * 60 + em) - (sh * 60 + sm);
+  if (shift.isOvernight || totalMin <= 0) totalMin += 24 * 60;
+  const breakMin = Number(shift.breakMinutes) || 0;
+  const effectiveMin = Math.max(totalMin - breakMin, 0);
+  const fmt = (m) => `${Math.floor(m / 60)}h ${m % 60}m`;
+  return { totalMin, effectiveMin, label: `${fmt(totalMin)} shift − ${fmt(breakMin)} break = ${fmt(effectiveMin)} effective work` };
+}
+
 export default function SettingsPage() {
   const { user, updateUser } = useAuth();
   const { refresh: refreshBranding } = useBranding();
@@ -86,6 +100,7 @@ export default function SettingsPage() {
         endTime: '18:30',
         graceMinutes: 0,
         halfDayMinutes: 240,
+        breakMinutes: 60,
         isOvernight: false,
       },
     ]);
@@ -101,6 +116,7 @@ export default function SettingsPage() {
         endTime: '18:30',
         graceMinutes: 0,
         halfDayMinutes: 240,
+        breakMinutes: 60,
         isOvernight: false,
       },
     ]);
@@ -488,44 +504,61 @@ export default function SettingsPage() {
               <button type="button" className="btn-secondary" onClick={addShift}>Add Shift</button>
             </div>
 
-            {(settings.attendance?.shifts || []).map((shift, index) => (
-              <div key={`${shift.code || 'shift'}-${index}`} className="rounded-xl border border-surface-200 p-4 space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="label">Code</label>
-                    <input className="input" value={shift.code || ''} onChange={(e) => updateShift(index, 'code', e.target.value)} />
+            {(settings.attendance?.shifts || []).map((shift, index) => {
+              const duration = calcShiftDuration(shift);
+              return (
+                <div key={`${shift.code || 'shift'}-${index}`} className="rounded-xl border border-surface-200 p-4 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Code</label>
+                      <input className="input" value={shift.code || ''} onChange={(e) => updateShift(index, 'code', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Name</label>
+                      <input className="input" value={shift.name || ''} onChange={(e) => updateShift(index, 'name', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Start Time</label>
+                      <input type="time" className="input" value={shift.startTime || '09:30'} onChange={(e) => updateShift(index, 'startTime', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">End Time</label>
+                      <input type="time" className="input" value={shift.endTime || '18:30'} onChange={(e) => updateShift(index, 'endTime', e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Grace Minutes</label>
+                      <input type="number" className="input" value={shift.graceMinutes ?? 0} onChange={(e) => updateShift(index, 'graceMinutes', Number(e.target.value) || 0)} />
+                    </div>
+                    <div>
+                      <label className="label">Half-Day Threshold (minutes)</label>
+                      <input type="number" className="input" value={shift.halfDayMinutes ?? 240} onChange={(e) => updateShift(index, 'halfDayMinutes', Number(e.target.value) || 240)} />
+                    </div>
+                    <div>
+                      <label className="label">Break Duration (minutes)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        className="input"
+                        value={shift.breakMinutes ?? 60}
+                        onChange={(e) => updateShift(index, 'breakMinutes', Number(e.target.value) || 0)}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="label">Name</label>
-                    <input className="input" value={shift.name || ''} onChange={(e) => updateShift(index, 'name', e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label">Start Time</label>
-                    <input type="time" className="input" value={shift.startTime || '09:30'} onChange={(e) => updateShift(index, 'startTime', e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label">End Time</label>
-                    <input type="time" className="input" value={shift.endTime || '18:30'} onChange={(e) => updateShift(index, 'endTime', e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label">Grace Minutes</label>
-                    <input type="number" className="input" value={shift.graceMinutes ?? 0} onChange={(e) => updateShift(index, 'graceMinutes', Number(e.target.value) || 0)} />
-                  </div>
-                  <div>
-                    <label className="label">Half-Day Threshold (minutes)</label>
-                    <input type="number" className="input" value={shift.halfDayMinutes ?? 240} onChange={(e) => updateShift(index, 'halfDayMinutes', Number(e.target.value) || 240)} />
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={Boolean(shift.isOvernight)} onChange={(e) => updateShift(index, 'isOvernight', e.target.checked)} />
-                    Overnight shift
-                  </label>
-                  <button type="button" className="text-sm text-rose-600" onClick={() => removeShift(index)}>Remove</button>
+                  {duration && (
+                    <p className="text-xs text-surface-500">{duration.label}</p>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={Boolean(shift.isOvernight)} onChange={(e) => updateShift(index, 'isOvernight', e.target.checked)} />
+                      Overnight shift
+                    </label>
+                    <button type="button" className="text-sm text-rose-600" onClick={() => removeShift(index)}>Remove</button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="card p-6 space-y-4">
