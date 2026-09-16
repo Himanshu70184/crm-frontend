@@ -4,9 +4,7 @@ const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== 'undefined' ? '/api' : 'http://127.0.0.1:5000/api');
 
-// Base URL without the /api suffix — used for static assets like
-// uploaded attendance screenshots, which Express serves at the root
-// (e.g. /uploads/attendance-screenshots/xxx.jpg), not under /api.
+// Base URL without the /api suffix, used for static assets served at the root.
 export const ASSET_BASE_URL = API_URL.replace(/\/api\/?$/, '');
 
 // Prefixes a relative asset path (e.g. from the backend's /uploads route)

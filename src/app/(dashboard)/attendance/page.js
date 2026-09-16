@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 import PageHeader from '@/components/ui/PageHeader';
 import StatCard from '@/components/ui/StatCard';
 import { IconAttendance, IconClock, IconChart, IconTeam } from '@/components/ui/Icons';
-import { attendanceAPI, usersAPI, getAssetUrl } from '@/lib/api';
+import { attendanceAPI, usersAPI } from '@/lib/api';
 import { formatDate, formatRelativeTime, getInitials, ROLE_COLORS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 
@@ -100,68 +100,6 @@ function getWorkedMinutes(record) {
   return Number(record.workMinutes) || 0;
 }
 
-async function captureFullScreenshot() {
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    throw new Error('Screen capture is not supported in this browser');
-  }
-
-  const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: {
-      displaySurface: 'monitor',
-    },
-    audio: false,
-  });
-
-  try {
-    const track = stream.getVideoTracks()[0];
-    const settings = track.getSettings();
-
-    if (settings.displaySurface && settings.displaySurface !== 'monitor') {
-      toast('Tip: choose "Entire Screen" next time to include the taskbar', {
-        icon: 'ℹ️',
-      });
-    }
-
-    const imageCapture = 'ImageCapture' in window ? new window.ImageCapture(track) : null;
-
-    let bitmap;
-    if (imageCapture) {
-      bitmap = await imageCapture.grabFrame();
-    } else {
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      await video.play();
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      bitmap = video;
-    }
-
-    const rawWidth = bitmap.width || bitmap.videoWidth;
-    const rawHeight = bitmap.height || bitmap.videoHeight;
-
-    const MAX_DIMENSION = 1600;
-    const scale = Math.min(1, MAX_DIMENSION / Math.max(rawWidth, rawHeight));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(rawWidth * scale);
-    canvas.height = Math.round(rawHeight * scale);
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-
-    const MAX_BASE64_LENGTH = 3.5 * 1024 * 1024;
-    let quality = 0.75;
-    let dataUrl = canvas.toDataURL('image/jpeg', quality);
-
-    while (dataUrl.length > MAX_BASE64_LENGTH && quality > 0.3) {
-      quality -= 0.15;
-      dataUrl = canvas.toDataURL('image/jpeg', quality);
-    }
-
-    return dataUrl;
-  } finally {
-    stream.getTracks().forEach((t) => t.stop());
-  }
-}
-
 export default function AttendancePage() {
   const { user } = useAuth();
   const elevated = ['super_admin', 'admin', 'hr'].includes(user?.role);
@@ -173,7 +111,6 @@ export default function AttendancePage() {
   const [users, setUsers] = useState([]);
   const [datePreset, setDatePreset] = useState('today');
   const [filters, setFilters] = useState(() => ({ ...DATE_PRESETS.today(), user: '' }));
-  const [viewScreenshot, setViewScreenshot] = useState(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -235,24 +172,8 @@ export default function AttendancePage() {
   const handleClock = async (type) => {
     setSaving(true);
     try {
-      // A screenshot is REQUIRED by the backend (AttendanceRecord schema
-      // marks clockInScreenshot/clockOutScreenshot as required). If screen
-      // capture fails or permission is denied, we must NOT call the
-      // clock-in/out API at all — sending the request without a screenshot
-      // only fails later with a confusing Mongoose validation error.
-      // Instead, stop here with a clear, actionable message.
-      let screenshot;
-      try {
-        screenshot = await captureFullScreenshot();
-      } catch (captureErr) {
-        toast.error(`Please allow screen sharing to clock ${type}`, {
-          style: { maxWidth: 460, whiteSpace: 'nowrap' },
-        });
-        return;
-      }
-
       const api = type === 'in' ? attendanceAPI.clockIn : attendanceAPI.clockOut;
-      await api({ screenshot });
+      await api();
       toast.success(type === 'in' ? 'Clock in recorded' : 'Clock out recorded');
       await fetchData();
     } catch (error) {
@@ -479,28 +400,6 @@ export default function AttendancePage() {
                           </div>
                         </div>
 
-                        {(record.clockInScreenshot || record.clockOutScreenshot) && (
-                          <div className="flex gap-2 sm:ml-2">
-                            {record.clockInScreenshot && (
-                              <button
-                                type="button"
-                                onClick={() => setViewScreenshot(record.clockInScreenshot)}
-                                className="text-xs px-2 py-1 rounded-lg border border-surface-200 text-surface-600 hover:bg-surface-100"
-                              >
-                                In shot
-                              </button>
-                            )}
-                            {record.clockOutScreenshot && (
-                              <button
-                                type="button"
-                                onClick={() => setViewScreenshot(record.clockOutScreenshot)}
-                                className="text-xs px-2 py-1 rounded-lg border border-surface-200 text-surface-600 hover:bg-surface-100"
-                              >
-                                Out shot
-                              </button>
-                            )}
-                          </div>
-                        )}
                       </div>
                     );
                   })}
@@ -511,19 +410,6 @@ export default function AttendancePage() {
         )}
       </div>
 
-      {viewScreenshot && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
-          onClick={() => setViewScreenshot(null)}
-        >
-          <img
-            src={getAssetUrl(viewScreenshot)}
-            alt="Attendance screenshot"
-            className="max-w-full max-h-full rounded-xl shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
     </div>
   );
 }
