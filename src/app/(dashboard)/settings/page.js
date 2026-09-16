@@ -245,7 +245,7 @@ export default function SettingsPage() {
           <div className="flex items-center gap-4 mb-6">
             <Avatar
               name={user?.name}
-              src={profile.avatar || user?.avatar}
+              src={profile.avatar ? getAssetUrl(profile.avatar) : ''}
               size={16}
               rounded="xl"
               textClassName="text-2xl"
@@ -433,18 +433,6 @@ export default function SettingsPage() {
                   onChange={(e) => updateField('attendance.idleTimeoutMinutes', Number(e.target.value) || 5)}
                 />
                 <p className="text-xs text-surface-500 mt-1">Inactivity before the desktop Activity Tracker auto-pauses.</p>
-              </div>
-              <div>
-                <label className="label">Screenshot Interval (minutes)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={120}
-                  className="input"
-                  value={settings.attendance?.screenshotIntervalMinutes ?? 10}
-                  onChange={(e) => updateField('attendance.screenshotIntervalMinutes', Number(e.target.value) || 10)}
-                />
-                <p className="text-xs text-surface-500 mt-1">How often the desktop Activity Tracker captures screenshots while running.</p>
               </div>
             </div>
 

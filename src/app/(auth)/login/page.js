@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [apiStatus, setApiStatus] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
 
@@ -138,15 +139,35 @@ export default function LoginPage() {
         </div>
         <div>
           <label className="label">Password</label>
-          <input
-            type="password"
-            className="input"
-            placeholder="••••••••"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            required
-            autoComplete="current-password"
-          />
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              className="input pr-12"
+              placeholder="••••••••"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              required
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((visible) => !visible)}
+              className="absolute inset-y-0 right-0 flex items-center px-3 text-surface-500 hover:text-surface-800"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              title={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3l18 18M10.584 10.587a2 2 0 002.829 2.829M9.88 4.24A10.94 10.94 0 0112 4c5 0 8.5 4 9.5 8a11.6 11.6 0 01-3.033 5.088M6.228 6.228C4.39 7.55 3.166 9.39 2.5 12c1 4 4.5 8 9.5 8a10.94 10.94 0 004.12-.8" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.5 12S6 4 12 4s9.5 8 9.5 8S18 20 12 20 2.5 12 2.5 12z" />
+                  <circle cx="12" cy="12" r="3" strokeWidth={2} />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
         <button type="submit" disabled={loading || needsSetup} className="btn-primary w-full disabled:opacity-60">
           {loading ? 'Signing in…' : 'Sign In'}
