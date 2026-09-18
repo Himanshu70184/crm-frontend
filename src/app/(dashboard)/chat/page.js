@@ -1751,9 +1751,9 @@ setMentionOpen(false);
     <div className="h-[calc(100vh-4rem)] -m-4 sm:-m-6 grid grid-cols-1 lg:grid-cols-[330px_1fr] gap-4">
       <aside className={`card flex-col overflow-hidden min-h-0 ${mobileChatView === 'chat' ? 'hidden lg:flex' : 'flex'}`}>
         <div className="p-4 border-b border-gray-100">
-          <div className="flex items-center justify-between gap-1">
+          <div className="flex flex-wrap items-center justify-between gap-1">
             <h1 className="text-sm font-bold text-gray-900">Team Chat</h1>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               {canCreate && (
                 <button
                   type="button"
@@ -1934,7 +1934,7 @@ setMentionOpen(false);
           <div className="h-full flex items-center justify-center text-gray-400 text-sm px-6 text-center">Select a conversation to start messaging</div>
         ) : (
           <>
-            <header className="px-3 sm:px-4 py-3 border-b border-gray-100 flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <header className="px-3 sm:px-4 py-3 border-b border-gray-100 flex flex-wrap items-center gap-2 sm:gap-3 flex-shrink-0">
               {/* Back to conversation list — mobile only */}
               <button
                 type="button"
@@ -1947,11 +1947,11 @@ setMentionOpen(false);
                 </svg>
               </button>
               <Avatar name={getConversationTitle(activeConversation)} src={getConversationAvatarUrl(activeConversation)} size={9} textClassName="text-xs" />
-              <div className="flex-1">
-                <h2 className="text-sm font-semibold text-gray-900">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-sm font-semibold text-gray-900 truncate">
                   {getConversationTitle(activeConversation)}
                 </h2>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-400 truncate">
                   {activeConversation.type === 'group'
                     ? `${(activeConversation.participants || []).length} member(s)`
                     : (activeConversation.type === 'self'
@@ -1959,7 +1959,10 @@ setMentionOpen(false);
                         : (isOtherParticipantPresent(activeConversation) ? 'Direct message' : 'This person has left the conversation'))}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              {/* Group actions: on mobile this wraps to its own full-width,
+                  horizontally-scrollable row under the title; on md+ it stays
+                  inline in the header exactly as before. */}
+              <div className="w-full md:w-auto flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-0.5 sm:pb-0">
                 <button
                   type="button"
                   title="Search in this chat"
@@ -1984,7 +1987,7 @@ setMentionOpen(false);
                 {activeConversation.type === 'group' && isActiveConvAdmin && (
                   <button
                     type="button"
-                    className="btn-secondary text-xs py-1.5"
+                    className="btn-secondary text-xs py-1.5 shrink-0 whitespace-nowrap"
                     onClick={openAddMembers}
                   >
                     + Add Member
@@ -1993,7 +1996,7 @@ setMentionOpen(false);
                 {activeConversation.type === 'group' && isActiveConvAdmin && (
                   <button
                     type="button"
-                    className="btn-secondary text-xs py-1.5"
+                    className="btn-secondary text-xs py-1.5 shrink-0 whitespace-nowrap"
                     onClick={() => {
                       setEditConversationTitle(activeConversation.title || '');
                       setEditConversationAvatarPreview(getConversationAvatarUrl(activeConversation));
@@ -2007,7 +2010,7 @@ setMentionOpen(false);
                 {activeConversation.type !== 'self' && (
                   <button
                     type="button"
-                    className="btn-secondary text-xs py-1.5"
+                    className="btn-secondary text-xs py-1.5 shrink-0 whitespace-nowrap"
                     onClick={() => setShowMembers(true)}
                   >
                     Members
@@ -2016,7 +2019,7 @@ setMentionOpen(false);
                 {activeConversation.type !== 'self' && (
                   <button
                     type="button"
-                    className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition"
+                    className="text-xs px-3 py-1.5 shrink-0 whitespace-nowrap rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition"
                     onClick={leaveActiveConversation}
                   >
                     Leave Chat
