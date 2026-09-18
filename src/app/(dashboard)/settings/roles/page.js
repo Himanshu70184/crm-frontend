@@ -357,39 +357,41 @@ function AuditLogsTab({ logs, loading }) {
 
   return (
     <div className="card overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50 border-b border-gray-200">
-          <tr>
-            {['Action', 'Role', 'Performed By', 'Description', 'Date'].map((h) => (
-              <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {logs.length === 0 && (
-            <tr><td colSpan={5} className="text-center py-10 text-gray-400">No audit logs yet</td></tr>
-          )}
-          {logs.map((log) => {
-            const meta = ACTION_LABELS[log.action] || { label: log.action, color: 'bg-gray-100 text-gray-600' };
-            return (
-              <tr key={log._id} className="hover:bg-gray-50">
-                <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${meta.color}`}>{meta.label}</span>
-                </td>
-                <td className="px-4 py-3 text-gray-700">{log.targetRole?.displayName || '—'}</td>
-                <td className="px-4 py-3">
-                  <div className="font-medium text-gray-900">{log.performedBy?.name}</div>
-                  <div className="text-xs text-gray-400">{log.performedBy?.email}</div>
-                </td>
-                <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{log.description}</td>
-                <td className="px-4 py-3 text-gray-400 whitespace-nowrap">
-                  {new Date(log.createdAt).toLocaleString()}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[680px]">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr>
+              {['Action', 'Role', 'Performed By', 'Description', 'Date'].map((h) => (
+                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {logs.length === 0 && (
+              <tr><td colSpan={5} className="text-center py-10 text-gray-400">No audit logs yet</td></tr>
+            )}
+            {logs.map((log) => {
+              const meta = ACTION_LABELS[log.action] || { label: log.action, color: 'bg-gray-100 text-gray-600' };
+              return (
+                <tr key={log._id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${meta.color}`}>{meta.label}</span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">{log.targetRole?.displayName || '—'}</td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-900">{log.performedBy?.name}</div>
+                    <div className="text-xs text-gray-400">{log.performedBy?.email}</div>
+                  </td>
+                  <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{log.description}</td>
+                  <td className="px-4 py-3 text-gray-400 whitespace-nowrap">
+                    {new Date(log.createdAt).toLocaleString()}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

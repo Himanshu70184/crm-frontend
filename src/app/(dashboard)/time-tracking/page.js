@@ -84,7 +84,7 @@ export default function TimeTrackingPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Time Tracking</h1>
           <p className="text-gray-500 text-sm mt-1">Total: <span className="font-semibold text-gray-900">{totalHours.toFixed(1)}h</span> logged</p>
@@ -140,14 +140,14 @@ export default function TimeTrackingPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        <select className="input w-48" value={filters.project} onChange={(e) => setFilters({ ...filters, project: e.target.value })}>
+        <select className="input w-full sm:w-48" value={filters.project} onChange={(e) => setFilters({ ...filters, project: e.target.value })}>
           <option value="">All projects</option>
           {projects.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
         </select>
-        <input className="input w-36" type="date" value={filters.startDate}
+        <input className="input w-full sm:w-36" type="date" value={filters.startDate}
           onChange={(e) => setFilters({ ...filters, startDate: e.target.value })} />
-        <span className="flex items-center text-gray-400 text-sm">to</span>
-        <input className="input w-36" type="date" value={filters.endDate}
+        <span className="hidden sm:flex items-center text-gray-400 text-sm">to</span>
+        <input className="input w-full sm:w-36" type="date" value={filters.endDate}
           onChange={(e) => setFilters({ ...filters, endDate: e.target.value })} />
         {(filters.project || filters.startDate || filters.endDate) && (
           <button onClick={() => setFilters({ project: '', startDate: '', endDate: '' })} className="text-sm text-gray-500 hover:text-gray-700">Clear</button>
@@ -169,8 +169,8 @@ export default function TimeTrackingPage() {
               </div>
               <div className="divide-y divide-gray-50">
                 {dateLogs.map((log) => (
-                  <div key={log._id} className="flex items-center gap-4 px-5 py-3">
-                    <div className="flex-1 min-w-0">
+                  <div key={log._id} className="flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 px-4 sm:px-5 py-3">
+                    <div className="flex-1 min-w-[55%] sm:min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{log.task?.title}</p>
                       <p className="text-xs text-gray-500">{log.project?.name}{log.description ? ` · ${log.description}` : ''}</p>
                     </div>

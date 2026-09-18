@@ -90,8 +90,8 @@ export default function TasksPage() {
   const selectedProjectName = projects.find((p) => p._id === filters.project)?.name || '';
 
   return (
-    <div className="-m-6 flex flex-col h-[calc(100vh-4rem)] min-h-0">
-      <div className="px-6 pt-6 pb-4 flex-shrink-0 space-y-4 bg-surface-50 border-b border-surface-200">
+    <div className="-m-4 sm:-m-6 flex flex-col h-[calc(100vh-4rem)] min-h-0">
+      <div className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4 flex-shrink-0 space-y-4 bg-surface-50 border-b border-surface-200">
         <PageHeader
           title="Tasks"
           subtitle={`Kanban board · ${tasks.length} task${tasks.length !== 1 ? 's' : ''}`}
@@ -121,13 +121,13 @@ export default function TasksPage() {
         <div className="flex flex-wrap gap-2 items-center">
           <input
             type="text"
-            className="input w-52 text-sm"
+            className="input w-full sm:w-52 text-sm"
             placeholder="Search tasks…"
             value={filters.search}
             onChange={(e) => setFilters({ ...filters, search: e.target.value })}
           />
           <select
-            className="input w-44 text-sm"
+            className="input w-full sm:w-44 text-sm"
             value={filters.project}
             onChange={(e) => setFilters({ ...filters, project: e.target.value })}
           >
@@ -137,7 +137,7 @@ export default function TasksPage() {
             ))}
           </select>
           <select
-            className="input w-32 text-sm"
+            className="input w-full sm:w-32 text-sm"
             value={filters.priority}
             onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
           >
@@ -165,7 +165,7 @@ export default function TasksPage() {
         - overflow-y-hidden stops this outer box from also scrolling vertically —
           vertical scrolling should happen per-column inside KanbanBoard instead.
       */}
-      <div className="flex-1 min-h-0 px-6 py-4">
+      <div className="flex-1 min-h-0 px-4 sm:px-6 py-4">
         {loading ? (
           <div className="flex justify-center py-24">
             <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary-200 border-t-primary-600" />

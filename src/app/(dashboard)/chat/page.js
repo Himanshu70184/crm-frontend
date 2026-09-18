@@ -192,6 +192,8 @@ export default function ChatPage() {
 
 const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState('');
+  // Mobile: which pane is visible ('list' | 'chat'). Desktop always shows both.
+  const [mobileChatView, setMobileChatView] = useState('list');
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
@@ -1746,8 +1748,8 @@ setMentionOpen(false);
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)] grid grid-cols-1 lg:grid-cols-[330px_1fr] gap-4">
-      <aside className="card flex flex-col overflow-hidden">
+    <div className="h-[calc(100vh-4rem)] -m-4 sm:-m-6 grid grid-cols-1 lg:grid-cols-[330px_1fr] gap-4">
+      <aside className={`card flex-col overflow-hidden min-h-0 ${mobileChatView === 'chat' ? 'hidden lg:flex' : 'flex'}`}>
         <div className="p-4 border-b border-gray-100">
           <div className="flex items-center justify-between gap-1">
             <h1 className="text-sm font-bold text-gray-900">Team Chat</h1>
@@ -1881,7 +1883,10 @@ setMentionOpen(false);
                       ? 'bg-green-50'
                       : 'bg-white hover:bg-gray-50'
                 }`}
-                onClick={() => setActiveConversationId(c._id)}
+                onClick={() => {
+                  setActiveConversationId(c._id);
+                  setMobileChatView('chat');
+                }}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-3 min-w-0">
@@ -1924,12 +1929,23 @@ setMentionOpen(false);
         )}
       </aside>
 
-      <section className="card flex flex-col overflow-hidden">
+      <section className={`card flex-col overflow-hidden min-h-0 ${mobileChatView === 'chat' ? 'flex' : 'hidden lg:flex'}`}>
         {!activeConversation ? (
-          <div className="h-full flex items-center justify-center text-gray-400 text-sm">Select a conversation</div>
+          <div className="h-full flex items-center justify-center text-gray-400 text-sm px-6 text-center">Select a conversation to start messaging</div>
         ) : (
           <>
-            <header className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+            <header className="px-3 sm:px-4 py-3 border-b border-gray-100 flex items-center gap-2 sm:gap-3 flex-shrink-0">
+              {/* Back to conversation list — mobile only */}
+              <button
+                type="button"
+                onClick={() => setMobileChatView('list')}
+                aria-label="Back to conversations"
+                className="lg:hidden shrink-0 w-8 h-8 -ml-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex items-center justify-center"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
               <Avatar name={getConversationTitle(activeConversation)} src={getConversationAvatarUrl(activeConversation)} size={9} textClassName="text-xs" />
               <div className="flex-1">
                 <h2 className="text-sm font-semibold text-gray-900">

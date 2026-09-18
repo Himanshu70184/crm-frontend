@@ -154,7 +154,7 @@ export default function NewProjectPage() {
             <textarea className="input" rows={3} placeholder="What is this project about?"
               value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Status</label>
               <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
@@ -172,7 +172,7 @@ export default function NewProjectPage() {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Start Date</label>
               <input className="input" type="date" value={form.startDate}
@@ -194,7 +194,7 @@ export default function NewProjectPage() {
         <div className="card p-6 space-y-4">
           <h2 className="font-semibold text-gray-900">Team Members</h2>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="relative" ref={teamDropdownRef}>
               <label className="label">Team</label>
               <button

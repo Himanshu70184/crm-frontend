@@ -128,7 +128,7 @@ export default function AddTaskModal({ open, onClose, onCreated, defaultProjectI
             <label className="label">Description</label>
             <textarea className="input" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Phase</label>
               <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
@@ -146,7 +146,7 @@ export default function AddTaskModal({ open, onClose, onCreated, defaultProjectI
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Assignee</label>
               <select className="input" value={form.assignee} onChange={(e) => setForm({ ...form, assignee: e.target.value })}>

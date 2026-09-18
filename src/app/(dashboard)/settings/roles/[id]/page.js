@@ -204,7 +204,7 @@ export default function RoleEditorPage() {
       {/* Filters */}
       <div className="flex items-center flex-wrap gap-3">
         <input
-          className="input w-56"
+          className="input w-full sm:w-56"
           placeholder="Search modules…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -238,7 +238,7 @@ export default function RoleEditorPage() {
 
       {/* Permission Matrix */}
       <div className="card overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
+        <table className="w-full text-sm border-collapse min-w-[720px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               <th className="sticky left-0 bg-gray-50 z-10 px-4 py-3 text-left font-semibold text-gray-700 min-w-[180px] border-r border-gray-200">

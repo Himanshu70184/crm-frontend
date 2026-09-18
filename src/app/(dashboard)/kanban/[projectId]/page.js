@@ -67,21 +67,21 @@ export default function KanbanPage() {
   }
 
   return (
-    <div className="-m-6 flex flex-col h-[calc(100vh-4rem)]">
-      <div className="px-6 pt-6 pb-4 flex-shrink-0 border-b border-surface-200 bg-surface-50">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-sm text-surface-500 mb-1">
+    <div className="-m-4 sm:-m-6 flex flex-col h-[calc(100vh-4rem)]">
+      <div className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4 flex-shrink-0 border-b border-surface-200 bg-surface-50">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm text-surface-500 mb-1 flex-wrap">
               <Link href="/projects" className="hover:text-primary-600">Projects</Link>
               <span>/</span>
-              <Link href={`/projects/${projectId}`} className="hover:text-primary-600">{project?.name}</Link>
+              <Link href={`/projects/${projectId}`} className="hover:text-primary-600 truncate max-w-[140px] sm:max-w-none">{project?.name}</Link>
               <span>/</span>
               <span>Kanban</span>
             </div>
-            <h1 className="text-2xl font-bold text-surface-900">Kanban Board</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-surface-900">Kanban Board</h1>
           </div>
-          <div className="flex items-center gap-2">
-            <select className="input w-36 text-sm" value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)}>
+          <div className="flex flex-wrap items-center gap-2">
+            <select className="input w-full sm:w-36 text-sm" value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)}>
               <option value="">All priorities</option>
               <option value="low">Low</option>
               <option value="medium">Medium</option>
@@ -97,7 +97,7 @@ export default function KanbanPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-x-auto px-6 py-4">
+      <div className="flex-1 overflow-x-auto px-4 sm:px-6 py-4">
         <KanbanBoard
           columns={columns}
           tasks={filteredTasks}

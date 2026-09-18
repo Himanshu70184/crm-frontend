@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -16,6 +16,12 @@ export default function DashboardLayout({ children }) {
   const pathname = usePathname();
   const currentModule = resolveOrganizationModuleForPath(pathname);
   const moduleBlocked = currentModule && !isModuleEnabled(currentModule);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Auto-close the mobile drawer whenever the route changes
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (!loading && !user) router.push('/login');
@@ -35,11 +41,11 @@ export default function DashboardLayout({ children }) {
     const manageHref = ['super_admin', 'admin'].includes(user.role) ? '/settings' : '/dashboard';
     return (
       <div className="flex h-screen overflow-hidden bg-gray-50">
-        <Sidebar />
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Navbar />
-          <main className="flex-1 overflow-y-auto p-6">
-            <div className="max-w-2xl mx-auto card p-8 text-center space-y-4">
+        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <Navbar onMenuClick={() => setSidebarOpen(true)} />
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+            <div className="max-w-2xl mx-auto card p-6 sm:p-8 text-center space-y-4">
               <div className="w-16 h-16 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto text-2xl font-bold">
                 !
               </div>
@@ -61,10 +67,10 @@ export default function DashboardLayout({ children }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Navbar />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <Navbar onMenuClick={() => setSidebarOpen(true)} />
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
     </div>
   );
