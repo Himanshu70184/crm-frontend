@@ -25,7 +25,7 @@ const navItems = [
   { href: '/settings',      label: 'Settings',     Icon: IconSettings,  roles: ['super_admin', 'admin', 'hr', 'manager', 'team_lead', 'team_member', 'member'] },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ open = false, onClose }) {
   const pathname = usePathname();
   const { user } = useAuth();
   const { branding, companyLogo } = useBranding();
@@ -35,25 +35,52 @@ export default function Sidebar() {
   );
 
   return (
-    <aside className="w-64 bg-brand-sidebar flex flex-col flex-shrink-0" style={{ backgroundColor: 'var(--brand-sidebar)' }}>
-      <div className="h-16 flex items-center px-5 border-b border-white/10">
-        <div className="flex items-center gap-3 min-w-0">
-          {companyLogo || branding.logoUrl ? (
-            <img src={companyLogo || branding.logoUrl} alt="" className="w-9 h-9 rounded-xl object-cover" />
-          ) : (
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg"
-              style={{ background: `linear-gradient(135deg, var(--brand-primary), var(--brand-accent))` }}
-            >
-              <IconLogo className="w-5 h-5 text-white" />
+    <>
+      {/* Mobile backdrop — click to close the drawer */}
+      <div
+        aria-hidden="true"
+        onClick={() => onClose?.()}
+        className={`fixed inset-0 z-40 bg-surface-900/60 backdrop-blur-sm transition-opacity duration-300 lg:hidden ${
+          open ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+      />
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-brand-sidebar flex flex-col flex-shrink-0 transform transition-transform duration-300 ease-in-out lg:static lg:inset-auto lg:z-auto lg:w-64 lg:max-w-none lg:translate-x-0 ${
+          open ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:shadow-none'
+        }`}
+        style={{ backgroundColor: 'var(--brand-sidebar)' }}
+      >
+        <div className="h-16 flex items-center justify-between px-5 border-b border-white/10">
+          <div className="flex items-center gap-3 min-w-0">
+            {companyLogo || branding.logoUrl ? (
+              <img src={companyLogo || branding.logoUrl} alt="" className="w-9 h-9 rounded-xl object-cover flex-shrink-0" />
+            ) : (
+              <div
+                className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg flex-shrink-0"
+                style={{ background: `linear-gradient(135deg, var(--brand-primary), var(--brand-accent))` }}
+              >
+                <IconLogo className="w-5 h-5 text-white" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <span className="font-bold text-white text-sm tracking-tight block truncate">{branding.appName}</span>
+              <p className="text-[10px] text-white/40 truncate">{branding.tagline?.slice(0, 28)}</p>
             </div>
-          )}
-          <div className="min-w-0">
-            <span className="font-bold text-white text-sm tracking-tight block truncate">{branding.appName}</span>
-            <p className="text-[10px] text-white/40 truncate">{branding.tagline?.slice(0, 28)}</p>
           </div>
+
+          {/* Close button — mobile only */}
+          <button
+            type="button"
+            onClick={() => onClose?.()}
+            aria-label="Close menu"
+            className="lg:hidden p-2 -mr-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
-      </div>
 
       <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
         <p className="px-3 py-2 text-[10px] font-semibold text-white/30 uppercase tracking-widest">Menu</p>
@@ -63,6 +90,7 @@ export default function Sidebar() {
             <Link
               key={href}
               href={href}
+              onClick={() => onClose?.()}
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all',
                 active ? 'text-white shadow-lg' : 'text-white/50 hover:text-white hover:bg-white/5'
@@ -92,5 +120,6 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   );
 }

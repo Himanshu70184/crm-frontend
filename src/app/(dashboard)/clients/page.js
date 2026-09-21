@@ -227,7 +227,7 @@ export default function ClientsPage() {
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-lg text-surface-900">{editClient ? 'Edit Client' : 'Add Client'}</h2>
               <button onClick={() => { setIsModalOpen(false); setEditClient(null); }} className="text-surface-400 hover:text-surface-600">✕</button>

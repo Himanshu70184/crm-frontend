@@ -100,3 +100,24 @@
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-surface-300;
 }
+
+/* ---- Mobile responsiveness helpers ---- */
+@layer base {
+  /* Never allow a stray fixed-width element to cause horizontal page scroll */
+  html,
+  body {
+    overflow-x: hidden;
+  }
+}
+
+/* Bump form control font size to 16px on small screens — prevents iOS Safari
+   from auto-zooming into inputs when they receive focus (anything < 16px
+   triggers the zoom). */
+@media (max-width: 640px) {
+  .input,
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

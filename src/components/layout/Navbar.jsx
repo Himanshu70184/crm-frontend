@@ -23,7 +23,7 @@ const routeTitles = {
   '/notifications': 'Notifications',
 };
 
-export default function Navbar() {
+export default function Navbar({ onMenuClick }) {
   const { user, logout } = useAuth();
   const { isModuleEnabled } = useOrganizationSettings();
   const router = useRouter();
@@ -68,10 +68,23 @@ export default function Navbar() {
   };
 
   return (
-    <header className="relative z-30 h-16 glass-nav flex items-center justify-between px-6 flex-shrink-0">
-      <div>
-        <h2 className="text-lg font-bold text-surface-900">{title}</h2>
-        <p className="text-xs text-surface-500">Hello, {user?.name?.split(' ')[0]}</p>
+    <header className="relative z-30 h-16 glass-nav flex items-center justify-between gap-3 px-4 sm:px-6 flex-shrink-0">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        {/* Hamburger — opens the sidebar drawer on mobile/tablet */}
+        <button
+          type="button"
+          onClick={onMenuClick}
+          aria-label="Open menu"
+          className="lg:hidden p-2 -ml-2 rounded-xl text-surface-600 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <div className="min-w-0">
+          <h2 className="text-base sm:text-lg font-bold text-surface-900 truncate">{title}</h2>
+          <p className="text-xs text-surface-500 truncate">Hello, {user?.name?.split(' ')[0]}</p>
+        </div>
       </div>
 
       <div className="flex items-center gap-2">

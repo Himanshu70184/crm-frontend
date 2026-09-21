@@ -270,7 +270,7 @@ export default function SettingsPage() {
               <label className="label">Full Name</label>
               <input className="input" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="label">Phone</label>
                 <input className="input" value={profile.phone} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} />
@@ -317,7 +317,7 @@ export default function SettingsPage() {
             <label className="label">Company Name</label>
             <input className="input" value={settings.companyName || ''} onChange={(e) => updateField('companyName', e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Company Email</label>
               <input className="input" type="email" value={settings.companyEmail || ''} onChange={(e) => updateField('companyEmail', e.target.value)} />
@@ -563,7 +563,7 @@ export default function SettingsPage() {
 
           <div className="card p-6 space-y-4">
             <h3 className="font-semibold text-surface-900">SMTP Configuration</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="col-span-2 sm:col-span-1">
                 <label className="label">SMTP Host</label>
                 <input className="input" placeholder="smtp.gmail.com" value={settings.smtp?.host || ''} onChange={(e) => updateField('smtp.host', e.target.value)} />

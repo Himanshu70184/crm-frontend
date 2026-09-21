@@ -87,7 +87,7 @@ export default function TeamPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Team</h1>
           <p className="text-gray-500 text-sm mt-1">{users.length} members</p>
@@ -101,9 +101,9 @@ export default function TeamPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        <input className="input w-56" placeholder="Search members…" value={search}
+        <input className="input w-full sm:w-56" placeholder="Search members…" value={search}
           onChange={(e) => setSearch(e.target.value)} />
-        <select className="input w-40" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+        <select className="input w-full sm:w-40" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
           <option value="">All roles</option>
           <option value="super_admin">Super Admin</option>
           <option value="admin">Admin</option>
@@ -244,7 +244,7 @@ function UserModal({ user: editUser, shiftOptions, departmentOptions, onClose, o
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="card w-full max-w-md p-6">
+      <div className="card w-full max-w-md p-6 max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-gray-900">{editUser ? 'Edit User' : 'Add Member'}</h3>
           <button

@@ -72,7 +72,7 @@ export default function ProjectsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
           <p className="text-gray-500 text-sm mt-1">{projects.length} projects</p>
@@ -88,18 +88,18 @@ export default function ProjectsPage() {
       <div className="flex flex-wrap gap-3">
         <input
           type="text"
-          className="input w-64"
+          className="input w-full sm:w-64"
           placeholder="Search projects…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select className="input w-56" value={client} onChange={(e) => setClient(e.target.value)}>
+        <select className="input w-full sm:w-56" value={client} onChange={(e) => setClient(e.target.value)}>
           <option value="">All clients</option>
           {clients.map((name) => (
             <option key={name} value={name}>{name}</option>
           ))}
         </select>
-        <select className="input w-48" value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select className="input w-full sm:w-48" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">All statuses</option>
           {STATUSES.slice(1).map((s) => (
             <option key={s} value={s}>{s.replace('_', ' ')}</option>

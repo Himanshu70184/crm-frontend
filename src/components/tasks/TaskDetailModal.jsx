@@ -772,7 +772,7 @@ export default function TaskDetailModal({
   const completedSubtasks = task?.subtasks?.filter((s) => s.completed).length || 0;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 sm:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-[100] flex items-start justify-center p-2 sm:p-4 lg:p-6 overflow-y-auto">
       <button
         type="button"
         className="fixed inset-0 bg-surface-900/50 backdrop-blur-[2px]"
@@ -781,7 +781,7 @@ export default function TaskDetailModal({
       />
 
       <div
-        className="relative w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-surface-200 flex flex-col max-h-[80vh] h-full my-auto"
+        className="relative w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-surface-200 flex flex-col max-h-[94vh] sm:max-h-[85vh] h-full my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {loading ? (
@@ -793,9 +793,9 @@ export default function TaskDetailModal({
         ) : (
           <>
             {/* Header — status + actions */}
-            <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-200 flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-4 sm:px-5 py-3 border-b border-surface-200 flex-shrink-0">
               <select
-                className="text-sm font-semibold rounded-lg border border-surface-200 bg-surface-50 px-3 py-1.5 pr-8 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                className="text-sm font-semibold rounded-lg border border-surface-200 bg-surface-50 px-3 py-1.5 pr-8 focus:outline-none focus:ring-2 focus:ring-primary-200 max-w-[160px] sm:max-w-none"
                 value={task.status}
                 onChange={(e) => handleStatusChange(e.target.value)}
               >
