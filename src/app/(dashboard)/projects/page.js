@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { projectsAPI } from '@/lib/api';
 import { formatDate, PROJECT_STATUS_COLORS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
+import EditProjectModal from '@/components/projects/EditProjectModal';
 import toast from 'react-hot-toast';
 
 const STATUSES = ['', 'planning', 'active', 'on_hold', 'completed', 'cancelled'];
@@ -55,6 +56,7 @@ export default function ProjectsPage() {
 
   const canCreate = ['super_admin', 'admin', 'manager'].includes(user?.role);
   const canChangeStatus = ['super_admin', 'admin', 'manager'].includes(user?.role);
+  const [editingProject, setEditingProject] = useState(null);
 
   // Called from a card's status dropdown. Updates the backend, then syncs
   // just that one project in local state from the server's response so the
@@ -122,16 +124,27 @@ export default function ProjectsPage() {
               key={project._id}
               project={project}
               canChangeStatus={canChangeStatus}
+              canEdit={canCreate}
+              onEdit={() => setEditingProject(project)}
               onStatusChange={handleStatusChange}
             />
           ))}
         </div>
       )}
+
+      <EditProjectModal
+        open={Boolean(editingProject)}
+        project={editingProject}
+        onClose={() => setEditingProject(null)}
+        onSaved={(updated) =>
+          setProjects((prev) => prev.map((p) => (p._id === updated._id ? updated : p)))
+        }
+      />
     </div>
   );
 }
 
-function ProjectCard({ project, canChangeStatus, onStatusChange }) {
+function ProjectCard({ project, canChangeStatus, canEdit, onEdit, onStatusChange }) {
   const router = useRouter();
   const [updating, setUpdating] = useState(false);
 
@@ -164,23 +177,47 @@ function ProjectCard({ project, canChangeStatus, onStatusChange }) {
           {project.name.charAt(0).toUpperCase()}
         </div>
 
-        {canChangeStatus ? (
-          <select
-            value={project.status}
-            onClick={(e) => e.stopPropagation()}
-            onChange={handleStatusSelect}
-            disabled={updating}
-            className={`badge border-0 cursor-pointer capitalize pr-6 ${PROJECT_STATUS_COLORS[project.status]}`}
-          >
-            {STATUSES.slice(1).map((s) => (
-              <option key={s} value={s}>{s.replace('_', ' ')}</option>
-            ))}
-          </select>
-        ) : (
-          <span className={`badge ${PROJECT_STATUS_COLORS[project.status]}`}>
-            {project.status.replace('_', ' ')}
-          </span>
-        )}
+        <div className="flex items-start gap-2">
+          {canChangeStatus ? (
+            <select
+              value={project.status}
+              onClick={(e) => e.stopPropagation()}
+              onChange={handleStatusSelect}
+              disabled={updating}
+              className={`badge border-0 cursor-pointer capitalize pr-6 ${PROJECT_STATUS_COLORS[project.status]}`}
+            >
+              {STATUSES.slice(1).map((s) => (
+                <option key={s} value={s}>{s.replace('_', ' ')}</option>
+              ))}
+            </select>
+          ) : (
+            <span className={`badge ${PROJECT_STATUS_COLORS[project.status]}`}>
+              {project.status.replace('_', ' ')}
+            </span>
+          )}
+
+          {canEdit && (
+            <button
+              type="button"
+              title="Edit project"
+              aria-label={`Edit ${project.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit?.();
+              }}
+              className="p-1.5 rounded-md text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors flex-shrink-0"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       <h3 className="font-semibold text-gray-900 mb-1 truncate">{project.name}</h3>

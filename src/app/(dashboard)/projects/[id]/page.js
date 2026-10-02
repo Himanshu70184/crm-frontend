@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { projectsAPI, tasksAPI, usersAPI } from '@/lib/api';
 import AddTaskModal from '@/components/tasks/AddTaskModal';
+import EditProjectModal from '@/components/projects/EditProjectModal';
 import { formatDate, TASK_STATUSES, PRIORITY_COLORS, PROJECT_STATUS_COLORS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import toast from 'react-hot-toast';
@@ -203,6 +204,7 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [showTaskModal, setShowTaskModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [tasksLoading, setTasksLoading] = useState(true);
 
   const canManage = ['super_admin', 'admin', 'manager'].includes(user?.role);
@@ -292,6 +294,13 @@ export default function ProjectDetailPage() {
         {canManage && (
           <div className="flex flex-wrap gap-2 flex-shrink-0">
             <Link href={`/kanban/${id}`} className="btn-secondary text-sm">🗂️ Kanban</Link>
+            <button
+              type="button"
+              onClick={() => setShowEditModal(true)}
+              className="btn-secondary text-sm"
+            >
+              Edit
+            </button>
             <button onClick={handleDeleteProject} className="btn-danger text-sm">Delete</button>
           </div>
         )}
@@ -422,6 +431,13 @@ export default function ProjectDetailPage() {
         onClose={() => setShowTaskModal(false)}
         onCreated={(t) => { setTasks((prev) => [t, ...prev]); setShowTaskModal(false); }}
         defaultProjectId={id}
+      />
+
+      <EditProjectModal
+        open={showEditModal}
+        project={project}
+        onClose={() => setShowEditModal(false)}
+        onSaved={setProject}
       />
     </div>
   );
