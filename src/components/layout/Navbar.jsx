@@ -15,6 +15,7 @@ const routeTitles = {
   '/projects': 'Projects',
   '/tasks': 'Tasks',
   '/attendance': 'Attendance',
+  '/attendance/leaves': 'Leave Requests',
   '/time-tracking': 'Time Tracking',
   '/reports': 'Reports & Analytics',
   '/clients': 'Clients',

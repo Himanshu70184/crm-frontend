@@ -34,6 +34,17 @@ const WEEK_DAYS = [
   ['Saturday', 6],
 ];
 
+// weekOfMonth 5 = last occurrence of the day in the month.
+const MONTH_WEEK_OPTIONS = [
+  ['1st', 1],
+  ['2nd', 2],
+  ['3rd', 3],
+  ['4th', 4],
+  ['Last', 5],
+];
+
+const monthWeekLabel = (week) => MONTH_WEEK_OPTIONS.find(([, v]) => v === Number(week))?.[0] || `${week}th`;
+
 export default function SettingsPage() {
   const { user, updateUser } = useAuth();
   const { refresh: refreshBranding } = useBranding();
@@ -129,6 +140,22 @@ export default function SettingsPage() {
     const holidays = [...(settings?.attendance?.holidays || [])];
     holidays[index] = { ...holidays[index], [key]: value };
     updateField('attendance.holidays', holidays);
+  };
+
+  const addMonthlyOffRule = () => {
+    const rules = settings?.attendance?.monthlyOffRules || [];
+    updateField('attendance.monthlyOffRules', [...rules, { weekOfMonth: 2, dayOfWeek: 6, name: '2nd Saturday' }]);
+  };
+
+  const removeMonthlyOffRule = (index) => {
+    const rules = (settings?.attendance?.monthlyOffRules || []).filter((_, i) => i !== index);
+    updateField('attendance.monthlyOffRules', rules);
+  };
+
+  const updateMonthlyOffRule = (index, key, value) => {
+    const rules = [...(settings?.attendance?.monthlyOffRules || [])];
+    rules[index] = { ...rules[index], [key]: value };
+    updateField('attendance.monthlyOffRules', rules);
   };
 
   const saveSettings = async (payload, message = 'Settings saved') => {
@@ -458,6 +485,55 @@ export default function SettingsPage() {
                   );
                 })}
               </div>
+              <p className="text-xs text-surface-500 mt-1">Selected weekdays are off on every occurrence (all weeks).</p>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between">
+                <p className="label">Monthly Off Rules</p>
+                <button type="button" className="btn-secondary text-xs py-1.5 px-3" onClick={addMonthlyOffRule}>Add Rule</button>
+              </div>
+              <p className="text-xs text-surface-500 mt-1 mb-2">
+                Recurring pattern — e.g. 2nd Saturday of every month is off. &quot;Last&quot; targets the final occurrence (for months with a 5th).
+              </p>
+              {(settings.attendance?.monthlyOffRules || []).length === 0 ? (
+                <p className="text-sm text-surface-500">No monthly off rules configured.</p>
+              ) : (
+                <div className="space-y-2">
+                  {(settings.attendance?.monthlyOffRules || []).map((rule, index) => (
+                    <div key={`monthly-rule-${index}`} className="flex flex-wrap items-center gap-2">
+                      <select
+                        className="input w-auto"
+                        value={Number(rule.weekOfMonth) || 1}
+                        onChange={(e) => updateMonthlyOffRule(index, 'weekOfMonth', Number(e.target.value))}
+                      >
+                        {MONTH_WEEK_OPTIONS.map(([label, value]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                      <select
+                        className="input w-auto"
+                        value={Number(rule.dayOfWeek) || 0}
+                        onChange={(e) => updateMonthlyOffRule(index, 'dayOfWeek', Number(e.target.value))}
+                      >
+                        {WEEK_DAYS.map(([label, value]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                      <input
+                        className="input flex-1 min-w-[160px]"
+                        placeholder="Label (e.g. 2nd Saturday)"
+                        value={rule.name || ''}
+                        onChange={(e) => updateMonthlyOffRule(index, 'name', e.target.value)}
+                      />
+                      <span className="text-xs text-surface-500 whitespace-nowrap">
+                        {monthWeekLabel(rule.weekOfMonth)} {(WEEK_DAYS.find(([, v]) => v === Number(rule.dayOfWeek)) || [''])[0]} off
+                      </span>
+                      <button type="button" className="text-sm text-rose-600" onClick={() => removeMonthlyOffRule(index)}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <label className="flex items-center gap-2 text-sm">
@@ -563,22 +639,22 @@ export default function SettingsPage() {
 
           <div className="card p-6 space-y-4">
             <h3 className="font-semibold text-surface-900">SMTP Configuration</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="col-span-2 sm:col-span-1">
                 <label className="label">SMTP Host</label>
-                <input className="input" placeholder="smtp.gmail.com" value={settings.smtp?.host || ''} onChange={(e) => updateField('smtp.host', e.target.value)} />
+                <input className="input w-full" placeholder="smtp.gmail.com" value={settings.smtp?.host || ''} onChange={(e) => updateField('smtp.host', e.target.value)} />
               </div>
-              <div>
+              <div className="col-span-2 sm:col-span-1">
                 <label className="label">Port</label>
-                <input className="input" type="number" value={settings.smtp?.port || 587} onChange={(e) => updateField('smtp.port', parseInt(e.target.value, 10))} />
+                <input className="input w-full" type="number" value={settings.smtp?.port || 587} onChange={(e) => updateField('smtp.port', parseInt(e.target.value, 10))} />
               </div>
-              <div>
+              <div className="col-span-2 sm:col-span-1">
                 <label className="label">Username</label>
-                <input className="input" value={settings.smtp?.user || ''} onChange={(e) => updateField('smtp.user', e.target.value)} />
+                <input className="input w-full" value={settings.smtp?.user || ''} onChange={(e) => updateField('smtp.user', e.target.value)} />
               </div>
-              <div>
+              <div className="col-span-2 sm:col-span-1">
                 <label className="label">Password</label>
-                <input className="input" type="password" placeholder="Leave blank to keep current" value={settings.smtp?.pass || ''} onChange={(e) => updateField('smtp.pass', e.target.value)} />
+                <input className="input w-full" type="password" placeholder="Leave blank to keep current" value={settings.smtp?.pass || ''} onChange={(e) => updateField('smtp.pass', e.target.value)} />
               </div>
               <div className="col-span-2">
                 <label className="label">From Address</label>

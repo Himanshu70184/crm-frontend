@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { projectsAPI, tasksAPI, usersAPI } from '@/lib/api';
@@ -431,6 +431,7 @@ function ProjectTeamTab({ project, canManage, onUpdate }) {
   const [allUsers, setAllUsers] = useState([]);
   const [selected, setSelected] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     usersAPI.getAll({ limit: 200 }).then((res) => {
@@ -439,15 +440,41 @@ function ProjectTeamTab({ project, canManage, onUpdate }) {
     }).catch(() => {});
   }, []);
 
+  // Only members actually saved on the project are treated as assigned.
   useEffect(() => {
     setSelected((project.team || []).map((m) => m._id));
   }, [project.team]);
 
-  const toggle = (userId) => {
-    setSelected((prev) =>
-      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
-    );
-  };
+  // Members currently on the project (what "Teams" is expected to display).
+  const assignedMembers = useMemo(
+    () =>
+      selected
+        .map((id) => allUsers.find((u) => u._id === id))
+        .filter(Boolean),
+    [selected, allUsers]
+  );
+
+  // Active users not yet on the project — candidates for adding.
+  const availableUsers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return allUsers.filter((u) => {
+      if (selected.includes(u._id)) return false;
+      if (!term) return true;
+      return (
+        (u.name || '').toLowerCase().includes(term) ||
+        (u.department || '').toLowerCase().includes(term) ||
+        (u.role || '').toLowerCase().includes(term)
+      );
+    });
+  }, [allUsers, selected, search]);
+
+  const isDirty = useMemo(() => {
+    const current = (project.team || []).map((m) => m._id).sort().join(',');
+    return [...selected].sort().join(',') !== current;
+  }, [selected, project.team]);
+
+  const addMember = (userId) => setSelected((prev) => [...prev, userId]);
+  const removeMember = (userId) => setSelected((prev) => prev.filter((id) => id !== userId));
 
   const save = async () => {
     setSaving(true);
@@ -468,42 +495,115 @@ function ProjectTeamTab({ project, canManage, onUpdate }) {
         <div>
           <h2 className="font-semibold text-gray-900">Project team</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Members listed here appear on tasks. All active staff can still be assigned from the task card.
+            Only members listed here are on this project and can see it on their dashboard.
           </p>
         </div>
-        {canManage && (
-          <button type="button" onClick={save} className="btn-primary text-sm" disabled={saving}>
-            {saving ? 'Saving…' : 'Save team'}
-          </button>
-        )}
       </div>
       {canManage ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-80 overflow-y-auto">
-          {allUsers.map((u) => (
-            <label
-              key={u._id}
-              className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer"
+        <div className="space-y-5">
+          {/* ── Currently assigned ─────────────────────────────────────── */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <h3 className="text-sm font-semibold text-gray-700">Assigned members</h3>
+              <span className="text-xs text-gray-400">{assignedMembers.length}</span>
+            </div>
+
+            {assignedMembers.length === 0 ? (
+              <p className="text-sm text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-lg">
+                No members assigned yet. Add people from below.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {assignedMembers.map((member) => (
+                  <div
+                    key={member._id}
+                    className="flex items-center gap-3 p-3 rounded-lg border border-primary-100 bg-primary-50/40"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-primary-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
+                      {(member.name || '?').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 truncate">{member.name}</p>
+                      <p className="text-xs text-gray-500 capitalize truncate">
+                        {member.department || member.role}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeMember(member._id)}
+                      className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
+                      title={`Remove ${member.name}`}
+                      aria-label={`Remove ${member.name}`}
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Add members ────────────────────────────────────────────── */}
+          <div className="pt-4 border-t border-gray-100">
+            <div className="flex items-center gap-2 mb-2">
+              <h3 className="text-sm font-semibold text-gray-700">Add members</h3>
+              <span className="text-xs text-gray-400">{availableUsers.length} not on this project</span>
+            </div>
+
+            <input
+              type="text"
+              className="input mb-3"
+              placeholder="Search by name, team or role…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+
+            {allUsers.length === 0 ? (
+              <p className="text-sm text-gray-400 py-4 text-center">
+                No users yet. Add users under Team in the sidebar.
+              </p>
+            ) : availableUsers.length === 0 ? (
+              <p className="text-sm text-gray-400 py-4 text-center">
+                {search ? 'No members match your search.' : 'Everyone is already on this project.'}
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-64 overflow-y-auto">
+                {availableUsers.map((u) => (
+                  <button
+                    key={u._id}
+                    type="button"
+                    onClick={() => addMember(u._id)}
+                    className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 hover:border-primary-200 cursor-pointer text-left transition-colors"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center font-bold text-sm shrink-0">
+                      {(u.name || '?').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 truncate">{u.name}</p>
+                      <p className="text-xs text-gray-500 capitalize truncate">
+                        {u.department || u.role}
+                      </p>
+                    </div>
+                    <span className="text-primary-600 font-bold text-lg leading-none shrink-0">+</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-1">
+            {isDirty && <span className="text-xs text-amber-600">Unsaved changes</span>}
+            <button
+              type="button"
+              onClick={save}
+              className="btn-primary text-sm"
+              disabled={saving || !isDirty}
             >
-              <input
-                type="checkbox"
-                className="rounded text-primary-600"
-                checked={selected.includes(u._id)}
-                onChange={() => toggle(u._id)}
-              />
-              <div className="w-9 h-9 rounded-full bg-primary-600 text-white flex items-center justify-center font-bold text-sm">
-                {u.name?.charAt(0).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">{u.name}</p>
-                <p className="text-xs text-gray-500 capitalize">{u.role}</p>
-              </div>
-            </label>
-          ))}
-          {allUsers.length === 0 && (
-            <p className="text-gray-400 col-span-3 py-6 text-center text-sm">
-              No users yet. Add users under Team in the sidebar.
-            </p>
-          )}
+              {saving ? 'Saving…' : 'Save team'}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

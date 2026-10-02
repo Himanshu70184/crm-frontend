@@ -137,9 +137,13 @@ export const attendanceAPI = {
   clockIn: (data) => api.post('/attendance/clock-in', data),
   clockOut: (data) => api.post('/attendance/clock-out', data),
   reconcile: (data) => api.post('/attendance/reconcile', data),
+  getLateCheckIns: (params) => api.get('/attendance/late-checkins', { params }),
+  reviewLateCheckIn: (id, data) => api.put(`/attendance/late-checkins/${id}/review`, data),
   getLeaves: (params) => api.get('/attendance/leaves', { params }),
   applyLeave: (data) => api.post('/attendance/leaves', data),
   reviewLeave: (id, data) => api.put(`/attendance/leaves/${id}/review`, data),
+  cancelLeaveRequest: (id) => api.put(`/attendance/leaves/${id}/cancel`),
+  getLeaveRequestEmails: (params) => api.get('/attendance/leaves/emails', { params }),
 };
 
 // ─── Dashboard ──────────────────────────────────────
@@ -212,6 +216,7 @@ export const chatAPI = {
   setAdmin: (conversationId, userId, isAdmin) =>
     api.put(`/chat/conversations/${conversationId}/admins/${userId}`, { isAdmin }),
   leaveConversation: (conversationId) => api.post(`/chat/conversations/${conversationId}/leave`),
+  deleteLeftConversation: (conversationId) => api.delete(`/chat/conversations/${conversationId}/left`),
   getMessages: (conversationId, params) => api.get(`/chat/conversations/${conversationId}/messages`, { params }),
   getMessageCount: (conversationId, params) => api.get(`/chat/conversations/${conversationId}/messages/count`, { params }),
   sendMessage: (conversationId, data) => {

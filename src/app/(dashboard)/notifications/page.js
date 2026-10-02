@@ -14,6 +14,12 @@ const TYPE_ICONS = {
   mentioned: '🔔',
   project_updated: '📁',
   deadline_reminder: '⏰',
+  late_checkin_pending: '⏳',
+  late_checkin_approved: '✅',
+  late_checkin_rejected: '❌',
+  leave_approved: '✅',
+  leave_rejected: '❌',
+  leave_requested: '📝',
 };
 
 export default function NotificationsPage() {

@@ -1,4 +1,4 @@
-export default function StatCard({ label, value, change, icon: Icon, accent = 'primary' }) {
+export default function StatCard({ label, value, change, icon: Icon, accent = 'primary', onClick, title }) {
   const accents = {
     primary: 'from-primary-500 to-primary-700',
     green: 'from-emerald-500 to-emerald-700',
@@ -7,8 +7,17 @@ export default function StatCard({ label, value, change, icon: Icon, accent = 'p
     violet: 'from-violet-500 to-violet-700',
   };
 
+  const clickable = typeof onClick === 'function';
+
   return (
-    <div className="card p-5 relative overflow-hidden group hover:shadow-premium-lg transition-shadow">
+    <div
+      className={`card p-5 relative overflow-hidden group hover:shadow-premium-lg transition-shadow${clickable ? ' cursor-pointer hover:-translate-y-0.5 active:translate-y-0 select-none' : ''}`}
+      onClick={onClick}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(e); } } : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      title={title}
+    >
       <div className={`absolute -right-4 -top-4 w-24 h-24 rounded-full bg-gradient-to-br ${accents[accent]} opacity-10 group-hover:opacity-20 transition-opacity`} />
       <div className="flex items-start justify-between relative">
         <div>

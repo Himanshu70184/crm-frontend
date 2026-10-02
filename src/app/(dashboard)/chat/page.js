@@ -1263,6 +1263,7 @@ useEffect(() => {
   const sendMessage = async () => {
     const body = newMessage.trim();
     if ((!body && pendingFiles.length === 0) || !activeConversationId || !canCreate) return;
+    if (conversations.find((c) => c._id === activeConversationId)?.isLeft) return;
     setSending(true);
     setUploading(pendingFiles.length > 0);
     try {
@@ -1609,6 +1610,23 @@ setMentionOpen(false);
     }
   };
 
+  // Permanently removes a group the current user has LEFT from their sidebar.
+  // The backend drops their leftUsers entry (and deletes the chat entirely if
+  // nobody is keeping it), so the history disappears for them only.
+  const deleteLeftConversationItem = async (conversationId) => {
+    try {
+      await chatAPI.deleteLeftConversation(conversationId);
+      toast.success('Chat removed from your list');
+      if (activeConversationId === conversationId) {
+        setActiveConversationId('');
+        setMessages([]);
+      }
+      await refreshConversations();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to delete chat');
+    }
+  };
+
   // Opens the user's private "Note to Self" chat. If one doesn't exist yet,
   // the backend creates it (and reuses it on subsequent calls).
   const openNoteToSelf = async () => {
@@ -1748,7 +1766,7 @@ setMentionOpen(false);
   }
 
   return (
-    <div className="h-[calc(100vh-4rem)] -m-4 sm:-m-6 grid grid-cols-1 lg:grid-cols-[330px_1fr] gap-4">
+    <div className="h-[calc(100vh-4rem)] -m-4 sm:-m-6 grid grid-cols-1 lg:grid-cols-[330px_1fr] gap-4 p-2">
       <aside className={`card flex-col overflow-hidden min-h-0 ${mobileChatView === 'chat' ? 'hidden lg:flex' : 'flex'}`}>
         <div className="p-4 border-b border-gray-100">
           <div className="flex flex-wrap items-center justify-between gap-1">
@@ -1896,6 +1914,7 @@ setMentionOpen(false);
                     <div className={`font-medium text-sm text-gray-900 truncate flex items-center gap-1.5 min-w-0 ${c.hasUnread ? 'font-semibold' : ''}`}>
                       <span className="truncate">{title}</span>
                       {otherLeft && <span className="text-[10px] font-normal text-gray-400 shrink-0">(left)</span>}
+                      {c.isLeft && <span className="text-[10px] font-normal text-amber-600 shrink-0">(you left)</span>}
                     </div>
 <div className={`text-xs truncate mt-0.5 pr-2 ${c.hasUnread ? 'font-semibold text-gray-800' : 'text-gray-500'}`} title={c.lastMessage?.body || ''}>
                       {lastMessagePreview(c, user?.name)}
@@ -1903,6 +1922,23 @@ setMentionOpen(false);
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {c.isLeft && (
+                      <button
+                        type="button"
+                        title="Delete this chat from your list"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm('Permanently remove this chat and its history from your list?')) {
+                            deleteLeftConversationItem(c._id);
+                          }
+                        }}
+                        className="w-6 h-6 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 flex items-center justify-center shrink-0"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    )}
                     {c.unreadCount > 0 && (
                       <span className="inline-flex items-center justify-center px-2 py-0.5 min-w-[20px] h-5 text-[11px] font-semibold text-white rounded-full bg-[var(--brand-primary)]" title={`${c.unreadCount} unread`}>
                         {c.unreadCount > 99 ? '99+' : c.unreadCount}
@@ -2011,18 +2047,46 @@ setMentionOpen(false);
                   <button
                     type="button"
                     className="btn-secondary text-xs py-1.5 shrink-0 whitespace-nowrap"
-                    onClick={() => setShowMembers(true)}
+                    onClick={() => {
+                      setShowMembers(true);
+                      // Fetch the full conversation so members show email + role
+                      // (the sidebar list only populates name/avatar for speed).
+                      chatAPI.getConversationById(activeConversationId).then((res) => {
+                        const full = res.data?.conversation;
+                        if (full) {
+                          setConversations((prev) => {
+                            const map = new Map(prev.map((c) => [String(c._id), c]));
+                            const existing = map.get(String(full._id)) || {};
+                            map.set(String(full._id), { ...existing, ...full });
+                            return Array.from(map.values());
+                          });
+                        }
+                      }).catch(() => {});
+                    }}
                   >
                     Members
                   </button>
                 )}
-                {activeConversation.type !== 'self' && (
+                {activeConversation.type !== 'self' && !activeConversation.isLeft && (
                   <button
                     type="button"
                     className="text-xs px-3 py-1.5 shrink-0 whitespace-nowrap rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition"
                     onClick={leaveActiveConversation}
                   >
                     Leave Chat
+                  </button>
+                )}
+                {activeConversation.isLeft && (
+                  <button
+                    type="button"
+                    className="text-xs px-3 py-1.5 shrink-0 whitespace-nowrap rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition"
+                    onClick={() => {
+                      if (confirm('Permanently remove this chat and its history from your list?')) {
+                        deleteLeftConversationItem(activeConversation._id);
+                      }
+                    }}
+                  >
+                    Delete Chat
                   </button>
                 )}
               </div>
@@ -2483,7 +2547,13 @@ onScroll={(e) => {
             )}
             </div>
 
-            {activeConversation.type !== 'group' && !isOtherParticipantPresent(activeConversation) ? (
+            {activeConversation.isLeft ? (
+              <footer className="p-4 border-t border-gray-100 text-center">
+                <p className="text-sm text-gray-400">
+                  You left this chat — the history is read-only. You can delete it from the conversation list.
+                </p>
+              </footer>
+            ) : activeConversation.type !== 'group' && !isOtherParticipantPresent(activeConversation) ? (
               <footer className="p-4 border-t border-gray-100 text-center">
                 <p className="text-sm text-gray-400">
                   <span className="font-medium text-gray-500">{getConversationTitle(activeConversation)}</span> has left this conversation — you can no longer send messages here.
@@ -2578,7 +2648,7 @@ onScroll={(e) => {
               <textarea
                 ref={messageInputRef}
                 className="input"
-                placeholder={canCreate ? 'Type a message... Use @name to mention' : 'You do not have send permission'}
+                placeholder={canCreate ? 'Type a message..' : 'You do not have send permission'}
                 value={newMessage}
                 disabled={!canCreate}
                 onChange={(e) => {
@@ -2658,7 +2728,9 @@ onScroll={(e) => {
               )}
                 </div>
                 <button
-                  className="btn-primary"
+                  type="button"
+                  className="btn-primary flex items-center justify-center gap-2 rounded-full p-2 md:p-3"
+                  title={editingMessage ? 'Save changes' : 'Send message'}
                   disabled={
                     editingMessage
                       ? savingEdit || !newMessage.trim()
@@ -2668,7 +2740,17 @@ onScroll={(e) => {
                 >
                   {editingMessage
                     ? (savingEdit ? 'Saving...' : 'Save')
-                    : (uploading ? 'Uploading...' : sending ? 'Sending...' : 'Send')}
+                    : (uploading ? 'Uploading...' : sending ? 'Sending...' : (
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                      </svg>
+                    ))}
                 </button>
               </div>
             </footer>
@@ -2679,7 +2761,7 @@ onScroll={(e) => {
 
       {showMembers && activeConversation && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-semibold text-gray-900">Conversation Members</h3>
@@ -2712,7 +2794,7 @@ onScroll={(e) => {
                 const isSelf = member._id === user?._id;
                 const acting = memberActionLoading === member._id;
                 return (
-<div key={member._id} className="px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-3">
+<div key={member._id} className="px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-3 flex-wrap md:flex-nowrap">
                     <Avatar name={member.name} src={member.avatar ? getAssetUrl(member.avatar) : ''} size={8} textClassName="text-xs font-semibold" />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">
