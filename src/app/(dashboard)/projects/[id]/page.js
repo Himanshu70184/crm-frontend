@@ -208,6 +208,10 @@ export default function ProjectDetailPage() {
   const [tasksLoading, setTasksLoading] = useState(true);
 
   const canManage = ['super_admin', 'admin', 'manager'].includes(user?.role);
+  // Anyone who can open this page already passed the backend's project
+  // membership check (owner/assigned team), so every non-client viewer may
+  // create tasks and subtasks in this project.
+  const canCreateTasks = ['super_admin', 'admin', 'hr', 'manager', 'team_lead', 'team_member', 'member'].includes(user?.role);
   const canViewBudget = ['super_admin', 'admin'].includes(user?.role);
 
   useEffect(() => {
@@ -291,17 +295,21 @@ export default function ProjectDetailPage() {
             </div>
           </div>
         </div>
-        {canManage && (
+        {canCreateTasks && (
           <div className="flex flex-wrap gap-2 flex-shrink-0">
             <Link href={`/kanban/${id}`} className="btn-secondary text-sm">🗂️ Kanban</Link>
-            <button
-              type="button"
-              onClick={() => setShowEditModal(true)}
-              className="btn-secondary text-sm"
-            >
-              Edit
-            </button>
-            <button onClick={handleDeleteProject} className="btn-danger text-sm">Delete</button>
+            {canManage && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(true)}
+                  className="btn-secondary text-sm"
+                >
+                  Edit
+                </button>
+                <button onClick={handleDeleteProject} className="btn-danger text-sm">Delete</button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -373,7 +381,7 @@ export default function ProjectDetailPage() {
             <p className="text-sm text-gray-500">
               {tasksLoading ? 'Loading tasks...' : `${tasks.length} tasks`}
             </p>
-            {canManage && (
+            {canCreateTasks && (
               <button onClick={() => setShowTaskModal(true)} className="btn-primary text-sm">+ Add Task</button>
             )}
           </div>

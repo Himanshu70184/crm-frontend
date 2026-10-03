@@ -15,7 +15,7 @@ import useDebouncedValue from '@/hooks/useDebouncedValue';
 export default function TasksPage() {
   const { user } = useAuth();
   const canManagePhases = ['super_admin', 'admin', 'manager'].includes(user?.role);
-  const canAddTask = ['super_admin', 'admin', 'manager', 'team_member', 'member'].includes(user?.role);
+  const canAddTask = ['super_admin', 'admin', 'hr', 'manager', 'team_lead', 'team_member', 'member'].includes(user?.role);
 
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [tasks, setTasks] = useState([]);
