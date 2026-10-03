@@ -1,6 +1,7 @@
 'use client';
 
 import { useBranding } from '@/context/BrandingContext';
+import { getAssetUrl } from '@/lib/api';
 
 export default function AuthLayout({ children }) {
   const { branding, companyLogo } = useBranding();
@@ -22,7 +23,7 @@ export default function AuthLayout({ children }) {
         />
         <div className="relative flex items-center gap-3">
           {companyLogo || branding.logoUrl ? (
-            <img src={companyLogo || branding.logoUrl} alt="" className="w-11 h-11 rounded-2xl object-cover" />
+            <img src={getAssetUrl(companyLogo || branding.logoUrl)} alt="" className="w-11 h-11 rounded-2xl object-cover" />
           ) : (
             <div
               className="w-11 h-11 rounded-2xl flex items-center justify-center"
@@ -48,7 +49,7 @@ export default function AuthLayout({ children }) {
         <div className="w-full max-w-md">
           <div className="lg:hidden text-center mb-8">
             {companyLogo || branding.logoUrl ? (
-              <img src={companyLogo || branding.logoUrl} alt="" className="w-12 h-12 rounded-2xl mx-auto mb-3 object-cover" />
+              <img src={getAssetUrl(companyLogo || branding.logoUrl)} alt="" className="w-12 h-12 rounded-2xl mx-auto mb-3 object-cover" />
             ) : (
               <div
                 className="inline-flex w-12 h-12 rounded-2xl items-center justify-center mb-3"

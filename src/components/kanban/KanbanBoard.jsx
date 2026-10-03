@@ -260,7 +260,7 @@ function TaskCard({ task, showProject, dragging, onOpenTask }) {
   }
 
   return (
-    <Link href={`/tasks/${task._id}`} className={className} onClick={(e) => dragging && e.preventDefault()}>
+    <Link prefetch={false} href={`/tasks/${task._id}`} className={className} onClick={(e) => dragging && e.preventDefault()}>
       {inner}
     </Link>
   );

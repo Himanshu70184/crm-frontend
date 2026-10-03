@@ -20,6 +20,7 @@ const TYPE_ICONS = {
   leave_approved: '✅',
   leave_rejected: '❌',
   leave_requested: '📝',
+  leave_cancelled: '🚫',
 };
 
 export default function NotificationsPage() {
@@ -91,7 +92,7 @@ export default function NotificationsPage() {
                 <div className="flex items-center gap-3 mt-1">
                   <span className="text-xs text-gray-400">{formatRelativeTime(n.createdAt)}</span>
                   {n.link && (
-                    <Link href={n.link} className="text-xs text-primary-600 hover:underline" onClick={() => markRead(n._id)}>
+                    <Link prefetch={false} href={n.link} className="text-xs text-primary-600 hover:underline" onClick={() => markRead(n._id)}>
                       View →
                     </Link>
                   )}

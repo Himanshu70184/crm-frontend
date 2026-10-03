@@ -7,6 +7,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import StatCard from '@/components/ui/StatCard';
 import { IconAttendance, IconClock, IconChart, IconTeam } from '@/components/ui/Icons';
 import Avatar from '@/components/ui/Avatar';
+import LeaveRequestModal, { todayKey } from '@/components/attendance/LeaveRequestModal';
 import { attendanceAPI, usersAPI } from '@/lib/api';
 import { formatDate, formatRelativeTime, getInitials, ROLE_COLORS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
@@ -125,6 +126,10 @@ export default function AttendancePage() {
   const [leaveRequestModal, setLeaveRequestModal] = useState({ open: false, leaveType: 'annual', startDate: '', endDate: '', reason: '' });
   const [leaveRequestSent, setLeaveRequestSent] = useState(false);
   const [leaveRequestEmails, setLeaveRequestEmails] = useState([]);
+  // Delivery outcome reported by the backend. Kept separate from
+  // leaveRequestEmails so a failed/missing SMTP setup is shown honestly
+  // instead of always claiming "emails sent".
+  const [leaveRequestEmailStatus, setLeaveRequestEmailStatus] = useState({ failed: [], notConfigured: false });
 
   const fetchData = async () => {
     setLoading(true);
@@ -283,13 +288,20 @@ export default function AttendancePage() {
         notifyViaEmail: true,
       });
 
+      // The modal stays open (flipped to the success view) so the user can
+      // actually see which addresses were notified. Navigating away happens
+      // from the success modal's Close button, not from here.
       setLeaveRequestSent(true);
       setLeaveRequestEmails(result.data.emailsSentTo || []);
-      setLeaveRequestModal({ open: false, leaveType: 'annual', startDate: '', endDate: '', reason: '' });
-      
-      toast.success('Leave request submitted successfully! Opening leave module...');
+      setLeaveRequestEmailStatus({
+        failed: result.data.failedEmails || [],
+        notConfigured: !!result.data.emailNotConfigured,
+      });
+      // Reset only the form fields - 'open' must stay true for the success view.
+      setLeaveRequestModal((prev) => ({ ...prev, leaveType: 'annual', startDate: '', endDate: '', reason: '' }));
+
+      toast.success('Leave request submitted successfully!');
       await fetchData();
-      router.push('/attendance/leaves');
     } catch (error) {
       console.log('Leave request error:', error.response?.data);
       const errorMessage = error.response?.data?.message || 
@@ -312,17 +324,19 @@ export default function AttendancePage() {
 
   // Open leave request modal
   const openLeaveRequestModal = () => {
-    const today = new Date().toISOString().split('T')[0];
-    setLeaveRequestModal({ 
-      open: true, 
-      leaveType: 'annual', 
-      startDate: today, 
-      endDate: today, 
-      reason: '' 
-    });
+    setLeaveRequestModal({ open: true, leaveType: 'annual', startDate: todayKey(), endDate: todayKey(), reason: '' });
     setLeaveRequestSent(false);
     setLeaveRequestEmails([]);
-    };
+    setLeaveRequestEmailStatus({ failed: [], notConfigured: false });
+  };
+
+  // Success-modal actions (shared component owns the UI).
+  const resetLeaveModal = () => {
+    setLeaveRequestModal({ open: false, leaveType: 'annual', startDate: '', endDate: '', reason: '' });
+    setLeaveRequestSent(false);
+    setLeaveRequestEmails([]);
+    setLeaveRequestEmailStatus({ failed: [], notConfigured: false });
+  };
 
   // On Leave card opens the dedicated leave module page.
   const openLeaveModule = () => {
@@ -413,115 +427,35 @@ export default function AttendancePage() {
         </div>
        )}
 
-      {/* Leave request modal section */}
-      {leaveRequestModal.open && !leaveRequestSent && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <form onSubmit={handleApplyLeave} className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
-            <div>
-              <h3 className="text-lg font-semibold text-surface-900">Request Leave</h3>
-              <p className="text-sm text-surface-500 mt-1">Submit a leave request with email notification to HR.</p>
-            </div>
-            <div>
-              <label className="label">Leave Type</label>
-              <select
-                className="input"
-                value={leaveRequestModal.leaveType}
-                onChange={(e) => {
-                  const nextType = e.target.value;
-                  setLeaveRequestModal((prev) => ({
-                    ...prev,
-                    leaveType: nextType,
-                    // A half day can only cover a single date, so keep the end
-                    // date pinned to the start date.
-                    endDate: nextType === 'half_day' ? prev.startDate : prev.endDate,
-                  }));
-                }}
-              >
-                <option value="annual">Annual Leave</option>
-                <option value="casual">Casual Leave</option>
-                <option value="sick">Sick Leave</option>
-                <option value="half_day">Half Day Leave</option>
-                <option value="personal">Personal Leave</option>
-                <option value="unpaid">Unpaid Leave</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="label">Start Date</label>
-                <input
-                  type="date"
-                  className="input"
-                  value={leaveRequestModal.startDate}
-                  onChange={(e) => {
-                    const nextStart = e.target.value;
-                    setLeaveRequestModal((prev) => ({
-                      ...prev,
-                      startDate: nextStart,
-                      endDate: prev.leaveType === 'half_day' ? nextStart : prev.endDate,
-                    }));
-                  }}
-                  min={new Date().toISOString().split('T')[0]}
-                />
-              </div>
-              <div>
-                <label className="label">End Date</label>
-                <input
-                  type="date"
-                  className="input"
-                  value={leaveRequestModal.endDate}
-                  onChange={(e) => setLeaveRequestModal((prev) => ({ ...prev, endDate: e.target.value }))}
-                  min={leaveRequestModal.startDate || new Date().toISOString().split('T')[0]}
-                  disabled={leaveRequestModal.leaveType === 'half_day'}
-                />
-                {leaveRequestModal.leaveType === 'half_day' && (
-                  <p className="text-xs text-surface-400 mt-1">Half day covers a single date.</p>
-                )}
-              </div>
-            </div>
-            <div>
-              <label className="label">Reason <span className="text-surface-400 font-normal">(optional)</span></label>
-              <textarea className="input min-h-[100px]" placeholder="e.g., Family vacation, medical appointment..." value={leaveRequestModal.reason} onChange={(e) => setLeaveRequestModal((prev) => ({ ...prev, reason: e.target.value }))} />
-            </div>
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700">
-              <p className="font-medium">📧 Email Notification</p>
-              <p className="text-xs mt-1 text-amber-600">An email will be sent to all HR and Admin users.</p>
-            </div>
-            <div className="flex justify-end gap-2">
-              <button type="button" className="btn-secondary" onClick={() => setLeaveRequestModal((prev) => ({ ...prev, open: false }))}>Cancel</button>
-              <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Submitting...' : 'Submit Request'}</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Leave request success Section */}
-      {leaveRequestModal.open && leaveRequestSent && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 text-center">
-            <div className="mx-auto w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mb-4">
-              <span className="text-3xl">✅</span>
-            </div>
-            <h3 className="text-lg font-semibold text-surface-900">Leave Request Submitted!</h3>
-            <p className="text-sm text-surface-500 mt-1">Your leave request has been submitted. Email notifications have been sent to HR.</p>
-            {leaveRequestEmails.length > 0 && (
-              <div className="mt-4 bg-surface-50 rounded-xl p-3 text-left">
-                <p className="text-xs uppercase tracking-wide text-surface-400 font-medium mb-2">Emails Sent To:</p>
-                {leaveRequestEmails.map((email, idx) => (
-                  <div key={idx} className="flex items-center gap-2 text-sm text-surface-700">
-                    <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-                    <span>{email}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex justify-end gap-2 mt-4">
-              <button type="button" className="btn-secondary" onClick={() => { setLeaveRequestSent(false); setLeaveRequestModal((prev) => ({ ...prev, open: true, leaveType: 'annual', startDate: '', endDate: '', reason: '' })); }}>Submit Another</button>
-              <button type="button" className="btn-primary" onClick={() => { setLeaveRequestModal({ open: false, leaveType: 'annual', startDate: '', endDate: '', reason: '' }); setLeaveRequestEmails([]); }}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
+{/* Shared leave request dialog (form + success views). Kept in one
+          component so this page and the leave module stay identical. */}
+      <LeaveRequestModal
+        open={leaveRequestModal.open}
+        sent={leaveRequestSent}
+        saving={saving}
+        form={leaveRequestModal}
+        setForm={setLeaveRequestModal}
+        onSubmit={handleApplyLeave}
+        onCancel={() => setLeaveRequestModal((prev) => ({ ...prev, open: false }))}
+        onSubmitAnother={() => {
+          setLeaveRequestSent(false);
+          setLeaveRequestEmailStatus({ failed: [], notConfigured: false });
+          setLeaveRequestModal((prev) => ({
+            ...prev,
+            open: true,
+            leaveType: 'annual',
+            startDate: todayKey(),
+            endDate: todayKey(),
+            reason: '',
+          }));
+        }}
+        onDone={() => {
+          resetLeaveModal();
+          router.push('/attendance/leaves');
+        }}
+        deliveredEmails={leaveRequestEmails}
+        emailStatus={leaveRequestEmailStatus}
+      />
 
       {/* Late check-in approval queue — visible to Super Admin/Admin/HR/Manager.
           HR & Manager requests appear only for Super Admin/Admin (server-side

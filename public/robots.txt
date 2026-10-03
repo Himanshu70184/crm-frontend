@@ -1,0 +1,15 @@
+User-agent: *
+Disallow: /dashboard
+Disallow: /projects
+Disallow: /tasks
+Disallow: /attendance
+Disallow: /time-tracking
+Disallow: /reports
+Disallow: /clients
+Disallow: /team
+Disallow: /settings
+Disallow: /notifications
+Disallow: /chat
+Disallow: /kanban
+Disallow: /login
+Disallow: /register

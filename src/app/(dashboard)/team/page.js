@@ -7,6 +7,7 @@ import { ROLE_COLORS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import Avatar from '@/components/ui/Avatar';
 import toast from 'react-hot-toast';
+import useDebouncedValue from '@/hooks/useDebouncedValue';
 
 // Displays roles in Title Case (e.g. "team_member" -> "Team Member"),
 // with a special case for "hr" which should always render as "HR".
@@ -23,7 +24,8 @@ export default function TeamPage() {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const search = useDebouncedValue(searchInput); // debounced so search fires one API call per pause, not per keystroke
   const [roleFilter, setRoleFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editUser, setEditUser] = useState(null);
@@ -101,8 +103,8 @@ export default function TeamPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        <input className="input w-full sm:w-56" placeholder="Search members…" value={search}
-          onChange={(e) => setSearch(e.target.value)} />
+        <input className="input w-full sm:w-56" placeholder="Search members…" value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)} />
         <select className="input w-full sm:w-40" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
           <option value="">All roles</option>
           <option value="super_admin">Super Admin</option>

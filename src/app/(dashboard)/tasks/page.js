@@ -10,6 +10,7 @@ import KanbanPhasesModal from '@/components/kanban/KanbanPhasesModal';
 import AddTaskModal from '@/components/tasks/AddTaskModal';
 import TaskDetailModal from '@/components/tasks/TaskDetailModal';
 import toast from 'react-hot-toast';
+import useDebouncedValue from '@/hooks/useDebouncedValue';
 
 export default function TasksPage() {
   const { user } = useAuth();
@@ -24,6 +25,8 @@ export default function TasksPage() {
   const [showAddTask, setShowAddTask] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [filters, setFilters] = useState({ priority: '', project: '', search: '' });
+  const [searchInput, setSearchInput] = useState('');
+  const debouncedSearch = useDebouncedValue(searchInput);
 
   const loadColumns = useCallback(() => {
     if (!filters.project) {
@@ -67,6 +70,13 @@ export default function TasksPage() {
   useEffect(() => {
     loadTasks();
   }, [loadTasks]);
+
+  // Push the debounced search text into filters.search so typing triggers
+  // loadTasks once the user pauses (300ms) instead of on every keystroke.
+  // Returning the same object when unchanged avoids an extra refetch.
+  useEffect(() => {
+    setFilters((f) => (f.search === debouncedSearch ? f : { ...f, search: debouncedSearch }));
+  }, [debouncedSearch]);
 
   const handleMoveTask = async (taskId, status) => {
     try {
@@ -123,8 +133,8 @@ export default function TasksPage() {
             type="text"
             className="input w-full sm:w-52 text-sm"
             placeholder="Search tasks…"
-            value={filters.search}
-            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
           <select
             className="input w-full sm:w-44 text-sm"

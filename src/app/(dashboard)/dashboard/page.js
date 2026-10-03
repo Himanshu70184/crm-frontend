@@ -141,11 +141,11 @@ export default function DashboardPage() {
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-surface-900">My Open Tasks</h3>
-            <Link href="/tasks" className="text-primary-600 text-sm font-medium hover:underline">View all</Link>
+            <Link prefetch={false} href="/tasks" className="text-primary-600 text-sm font-medium hover:underline">View all</Link>
           </div>
           <div className="space-y-2">
             {stats.myTasks?.length ? stats.myTasks.map((task) => (
-              <Link key={task._id} href={`/tasks/${task._id}`} className="flex items-start gap-3 p-3 rounded-xl hover:bg-primary-50/50 transition-colors border border-transparent hover:border-primary-100">
+              <Link prefetch={false} key={task._id} href={`/tasks/${task._id}`} className="flex items-start gap-3 p-3 rounded-xl hover:bg-primary-50/50 transition-colors border border-transparent hover:border-primary-100">
                 <span className={`badge ${PRIORITY_COLORS[task.priority]}`}>{task.priority}</span>
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-surface-900 truncate">{task.title}</p>
@@ -161,11 +161,11 @@ export default function DashboardPage() {
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-surface-900">Recent Projects</h3>
-            <Link href="/projects" className="text-primary-600 text-sm font-medium hover:underline">View all</Link>
+            <Link prefetch={false} href="/projects" className="text-primary-600 text-sm font-medium hover:underline">View all</Link>
           </div>
           <div className="space-y-2">
             {stats.recentProjects?.length ? stats.recentProjects.map((project) => (
-              <Link key={project._id} href={`/projects/${project._id}`} className="flex items-center gap-3 p-3 rounded-xl hover:bg-surface-50 transition-colors">
+              <Link prefetch={false} key={project._id} href={`/projects/${project._id}`} className="flex items-center gap-3 p-3 rounded-xl hover:bg-surface-50 transition-colors">
                 <div className="w-10 h-10 bg-gradient-to-br from-primary-100 to-violet-100 text-primary-700 rounded-xl flex items-center justify-center font-bold text-sm">
                   {project.name.charAt(0)}
                 </div>

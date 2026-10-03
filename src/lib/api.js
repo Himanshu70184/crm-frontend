@@ -140,6 +140,7 @@ export const attendanceAPI = {
   getLateCheckIns: (params) => api.get('/attendance/late-checkins', { params }),
   reviewLateCheckIn: (id, data) => api.put(`/attendance/late-checkins/${id}/review`, data),
   getLeaves: (params) => api.get('/attendance/leaves', { params }),
+  estimateLeave: (params) => api.get('/attendance/leaves/estimate', { params }),
   applyLeave: (data) => api.post('/attendance/leaves', data),
   reviewLeave: (id, data) => api.put(`/attendance/leaves/${id}/review`, data),
   cancelLeaveRequest: (id) => api.put(`/attendance/leaves/${id}/cancel`),

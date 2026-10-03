@@ -383,7 +383,7 @@ export default function ProjectDetailPage() {
             ) : tasks.length === 0 ? (
               <p className="p-8 text-center text-gray-400">No tasks yet. Add your first task!</p>
             ) : tasks.map((task) => (
-              <Link key={task._id} href={`/tasks/${task._id}`} className="flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors">
+              <Link prefetch={false} key={task._id} href={`/tasks/${task._id}`} className="flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors">
                 <span className={`badge ${PRIORITY_COLORS[task.priority]} flex-shrink-0`}>{task.priority}</span>
                 <span className="flex-1 text-sm font-medium text-gray-900 truncate">{task.title}</span>
                 <span className={`badge flex-shrink-0 ${TASK_STATUSES.find((s) => s.value === task.status)?.color}`}>

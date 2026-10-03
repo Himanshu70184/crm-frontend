@@ -8,6 +8,7 @@ import { formatDate, PROJECT_STATUS_COLORS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import EditProjectModal from '@/components/projects/EditProjectModal';
 import toast from 'react-hot-toast';
+import useDebouncedValue from '@/hooks/useDebouncedValue';
 
 const STATUSES = ['', 'planning', 'active', 'on_hold', 'completed', 'cancelled'];
 
@@ -16,7 +17,8 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const search = useDebouncedValue(searchInput); // debounced so search fires one API call per pause, not per keystroke
   const [status, setStatus] = useState('');
   // Initialized from ?client=<name> in the URL (e.g. linked from a Clients
   // page card), so arriving here already filters to that client's projects.
@@ -92,8 +94,8 @@ export default function ProjectsPage() {
           type="text"
           className="input w-full sm:w-64"
           placeholder="Search projects…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
         />
         <select className="input w-full sm:w-56" value={client} onChange={(e) => setClient(e.target.value)}>
           <option value="">All clients</option>

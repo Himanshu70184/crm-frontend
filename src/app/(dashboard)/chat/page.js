@@ -499,6 +499,15 @@ const [conversations, setConversations] = useState([]);
     setActiveConversationId((prev) => {
       if (prev && fetched.some((c) => c._id === prev)) return prev;
       if (prev && !append) return prev; // keep current selection on refresh
+      // Deep link (?conversation=...) takes precedence over auto-selecting the
+      // first conversation. Otherwise a notification link would open fetched[0]
+      // first (firing mark-read + messages + conversation details for the wrong
+      // chat) and then switch to the requested one, duplicating all three calls
+      // on page load in production.
+      const requested = searchParams.get('conversation');
+      if (!prev && requested && fetched.some((c) => c._id === requested)) {
+        return requested;
+      }
       return fetched.length > 0 && !prev ? fetched[0]._id : '';
     });
   };
@@ -794,16 +803,19 @@ const fetchUnreadCount = async (conversationId, seenTs) => {
     };
     init();
 
-    // Fallback polling only when socket is disconnected.
+    // Fallback polling only when socket is disconnected, at most once a
+    // minute, and never while the tab is hidden so background tabs make
+    // zero requests.
     const timer = setInterval(async () => {
       if (socketRef.current?.connected) return;
+      if (document.visibilityState === 'hidden') return;
       try {
         await refreshConversations();
         if (activeConversationIdRef.current) await loadMessages(activeConversationIdRef.current);
       } catch (_) {
         // silent polling failure
       }
-    }, 20000);
+    }, 60000);
 
     return () => {
       mounted = false;

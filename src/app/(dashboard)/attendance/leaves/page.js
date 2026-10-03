@@ -7,17 +7,8 @@ import PageHeader from '@/components/ui/PageHeader';
 import StatCard from '@/components/ui/StatCard';
 import { IconAttendance, IconTeam } from '@/components/ui/Icons';
 import { attendanceAPI } from '@/lib/api';
+import LeaveRequestModal, { todayKey } from '@/components/attendance/LeaveRequestModal';
 import { useAuth } from '@/context/AuthContext';
-
-const LEAVE_TYPE_OPTIONS = [
-  { value: 'annual', label: 'Annual Leave' },
-  { value: 'casual', label: 'Casual Leave' },
-  { value: 'sick', label: 'Sick Leave' },
-  { value: 'half_day', label: 'Half Day Leave' },
-  { value: 'personal', label: 'Personal Leave' },
-  { value: 'unpaid', label: 'Unpaid Leave' },
-  { value: 'other', label: 'Other' },
-];
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -51,6 +42,9 @@ export default function LeaveRequestsPage() {
   const [leaveRequestModal, setLeaveRequestModal] = useState({ open: false, leaveType: 'annual', startDate: '', endDate: '', reason: '' });
   const [leaveRequestSent, setLeaveRequestSent] = useState(false);
   const [leaveRequestEmails, setLeaveRequestEmails] = useState([]);
+  // Real delivery outcome from the backend - used to avoid telling the user
+  // "emails sent" when SMTP is unconfigured or delivery failed.
+  const [leaveRequestEmailStatus, setLeaveRequestEmailStatus] = useState({ failed: [], notConfigured: false });
   const [leaveDetailModal, setLeaveDetailModal] = useState({ open: false, leave: null, reviewNote: '' });
   const [showRejectModal, setShowRejectModal] = useState(false);
 
@@ -97,6 +91,14 @@ export default function LeaveRequestsPage() {
     setLeaveRequestModal({ open: true, leaveType: 'annual', startDate: today, endDate: today, reason: '' });
     setLeaveRequestSent(false);
     setLeaveRequestEmails([]);
+    setLeaveRequestEmailStatus({ failed: [], notConfigured: false });
+  };
+
+  const resetLeaveModal = () => {
+    setLeaveRequestModal({ open: false, leaveType: 'annual', startDate: '', endDate: '', reason: '' });
+    setLeaveRequestSent(false);
+    setLeaveRequestEmails([]);
+    setLeaveRequestEmailStatus({ failed: [], notConfigured: false });
   };
 
   const handleApplyLeave = async (e) => {
@@ -113,8 +115,22 @@ export default function LeaveRequestsPage() {
       });
       setLeaveRequestSent(true);
       setLeaveRequestEmails(result.data.emailsSentTo || []);
-      setLeaveRequestModal({ open: false, leaveType: 'annual', startDate: '', endDate: '', reason: '' });
-      toast.success('Leave request submitted successfully! Email notification sent to HR.');
+      setLeaveRequestEmailStatus({
+        failed: result.data.failedEmails || [],
+        notConfigured: !!result.data.emailNotConfigured,
+      });
+      // Keep 'open' true so the success view (recipient list / warnings) is
+      // actually rendered - previously it was cleared here and the modal
+      // never appeared.
+      setLeaveRequestModal((prev) => ({ ...prev, leaveType: 'annual', startDate: '', endDate: '', reason: '' }));
+
+      if (result.data.emailNotConfigured) {
+        toast.success('Leave request submitted, but email is not configured on the server.');
+      } else if (result.data.emailSent) {
+        toast.success('Leave request submitted successfully! Email notifications sent.');
+      } else {
+        toast.success('Leave request submitted successfully.');
+      }
       await fetchLeaves();
     } catch (error) {
       toast.error(error.response?.data?.message || error.response?.data?.error || error.message || 'Failed to submit leave request');
@@ -324,40 +340,31 @@ export default function LeaveRequestsPage() {
         </div>
       )}
 
-      {leaveRequestModal.open && !leaveRequestSent && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <form onSubmit={handleApplyLeave} className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
-            <div><h3 className="text-lg font-semibold text-surface-900">Request Leave</h3><p className="text-sm text-surface-500 mt-1">Submit a leave request with email notification to HR.</p></div>
-            <div>
-              <label className="label">Leave Type</label>
-              <select className="input" value={leaveRequestModal.leaveType} onChange={(e) => setLeaveRequestModal((prev) => ({ ...prev, leaveType: e.target.value, endDate: e.target.value === 'half_day' ? prev.startDate : prev.endDate }))}>
-                {LEAVE_TYPE_OPTIONS.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div><label className="label">Start Date</label><input type="date" className="input" value={leaveRequestModal.startDate} onChange={(e) => setLeaveRequestModal((prev) => ({ ...prev, startDate: e.target.value }))} /></div>
-              <div><label className="label">End Date</label><input type="date" className="input" value={leaveRequestModal.endDate} min={leaveRequestModal.startDate || undefined} disabled={leaveRequestModal.leaveType === 'half_day'} onChange={(e) => setLeaveRequestModal((prev) => ({ ...prev, endDate: e.target.value }))} /></div>
-            </div>
-            <div><label className="label">Reason (optional)</label><textarea className="input min-h-[100px]" value={leaveRequestModal.reason} onChange={(e) => setLeaveRequestModal((prev) => ({ ...prev, reason: e.target.value }))} /></div>
-            <div className="flex justify-end gap-2">
-              <button type="button" className="btn-secondary" onClick={() => setLeaveRequestModal((prev) => ({ ...prev, open: false }))}>Cancel</button>
-              <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Submitting...' : 'Submit Request'}</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {leaveRequestModal.open && leaveRequestSent && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 text-center">
-            <h3 className="text-lg font-semibold text-surface-900">Leave Request Submitted!</h3>
-            <p className="text-sm text-surface-500 mt-1">Email notifications have been sent to HR.</p>
-            <div className="flex justify-end gap-2 mt-4">
-              <button type="button" className="btn-primary" onClick={() => { setLeaveRequestModal({ open: false, leaveType: 'annual', startDate: '', endDate: '', reason: '' }); setLeaveRequestEmails([]); }}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
+            {/* Shared leave request dialog - identical to the one on the Attendance page. */}
+      <LeaveRequestModal
+        open={leaveRequestModal.open}
+        sent={leaveRequestSent}
+        saving={saving}
+        form={leaveRequestModal}
+        setForm={setLeaveRequestModal}
+        onSubmit={handleApplyLeave}
+        onCancel={() => setLeaveRequestModal((prev) => ({ ...prev, open: false }))}
+        onSubmitAnother={() => {
+          setLeaveRequestSent(false);
+          setLeaveRequestEmailStatus({ failed: [], notConfigured: false });
+          setLeaveRequestModal((prev) => ({
+            ...prev,
+            open: true,
+            leaveType: 'annual',
+            startDate: todayKey(),
+            endDate: todayKey(),
+            reason: '',
+          }));
+        }}
+        onDone={resetLeaveModal}
+        deliveredEmails={leaveRequestEmails}
+        emailStatus={leaveRequestEmailStatus}
+      />
     </div>
   );
 }

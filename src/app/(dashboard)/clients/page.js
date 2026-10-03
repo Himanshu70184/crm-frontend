@@ -183,6 +183,7 @@ export default function ClientsPage() {
                   className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50">Del</button>
                 {linked.length > 0 && (
                   <Link
+                    prefetch={false}
                     href={`/projects?client=${encodeURIComponent(client.name)}`}
                     className="text-xs text-primary-600 hover:text-primary-700 font-medium px-2 py-1 rounded hover:bg-primary-50 ml-auto"
                   >

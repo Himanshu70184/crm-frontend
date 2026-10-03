@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
@@ -33,7 +33,14 @@ export default function Navbar({ onMenuClick }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const showNotifications = isModuleEnabled('notifications');
 
+  const lastUnreadFetchRef = useRef(0);
+
   useEffect(() => {
+    // Throttled to at most one request every 30s so client-side navigation
+    // does not fire a notification count request on every route change.
+    const now = Date.now();
+    if (now - lastUnreadFetchRef.current < 30000) return;
+    lastUnreadFetchRef.current = now;
     notificationsAPI.getAll({ unread: true, limit: 1 })
       .then((res) => setUnread(res.data.unreadCount))
       .catch(() => {});

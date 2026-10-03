@@ -669,6 +669,7 @@ export default function SettingsPage() {
                 ['notifications.taskAssigned', 'Task assigned'],
                 ['notifications.mentionAlerts', 'Mentions in comments'],
                 ['notifications.deadlineReminders', 'Deadline reminders (daily 9 AM)'],
+                ['notifications.leaveRequests', 'Leave request emails'],
               ].map(([path, label]) => (
                 <label key={path} className="flex items-center gap-2 text-sm">
                   <input

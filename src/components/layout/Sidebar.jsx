@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useBranding } from '@/context/BrandingContext';
 import { useOrganizationSettings } from '@/context/OrganizationSettingsContext';
 import { cn } from '@/lib/utils';
+import { getAssetUrl } from '@/lib/api';
 import {
   IconDashboard, IconProjects, IconTasks, IconClock, IconAttendance,
   IconTeam, IconChart, IconClients, IconSettings, IconLogo, IconChat,
@@ -54,7 +55,7 @@ export default function Sidebar({ open = false, onClose }) {
         <div className="h-16 flex items-center justify-between px-5 border-b border-white/10">
           <div className="flex items-center gap-3 min-w-0">
             {companyLogo || branding.logoUrl ? (
-              <img src={companyLogo || branding.logoUrl} alt="" className="w-9 h-9 rounded-xl object-cover flex-shrink-0" />
+              <img src={getAssetUrl(companyLogo || branding.logoUrl)} alt="" className="w-9 h-9 rounded-xl object-cover flex-shrink-0" />
             ) : (
               <div
                 className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg flex-shrink-0"
@@ -90,6 +91,7 @@ export default function Sidebar({ open = false, onClose }) {
             <Link
               key={href}
               href={href}
+              prefetch={false}
               onClick={() => onClose?.()}
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all',
